@@ -1,0 +1,131 @@
+================================================================================
+ANALYSE DE LA PAGE DE DETAIL D'UNE PROPRIETE CENTRIS
+================================================================================
+
+RESULTAT DU TEST DE CLIC:
+- Le clic sur une adresse de propriete fonctionne
+- Un panneau de detail s'ouvre (overlay/sidebar)
+- L'URL change pour ajouter "#1" a la fin
+- Le panneau s'affiche sans recharger toute la page
+
+================================================================================
+ELEMENTS IDENTIFIES DANS LE PANNEAU DE DETAIL:
+================================================================================
+
+1. NAVIGATION:
+   - Bouton "Retour aux resultats" (ferme le panneau)
+   - Bouton "Voir le resultat precedent" (navigation entre proprietes)
+
+2. PHOTOS:
+   - Lien "Voir toutes les photos (9)" 
+   - Indique qu'il y a 9 photos disponibles pour cette propriete
+   - Galerie de photos probablement accessible
+
+3. ACTIONS UTILISATEUR:
+   - Enregistrer comme favori
+   - Enregistrer comme possibilite
+   - Enregistrer comme rejete
+   - Retirer des favoris/possibilites/rejetes
+   - Menu deroulant avec toutes ces options
+
+4. FONCTIONNALITES DISPONIBLES:
+   - "Communaute" / "Communautes" (lien/onglet)
+   - "Fonction Financiere" / "Fonctions Financieres" (lien/onglet)
+   - Ces liens semblent ouvrir des sections supplementaires
+
+5. CARTE INTERACTIVE:
+   - La carte reste visible dans le panneau
+   - Tous les outils de carte sont toujours accessibles
+   - La propriete est probablement marquee sur la carte
+
+6. STRUCTURE DU PANNEAU:
+   - Le panneau semble etre un overlay/sidebar qui s'ouvre sur le cote
+   - Il ne remplace pas la page principale
+   - La liste des resultats reste probablement visible en arriere-plan
+
+================================================================================
+INFORMATIONS PROBABLEMENT DISPONIBLES (mais non visibles dans le snapshot):
+================================================================================
+
+Le snapshot montre principalement la structure de navigation et les boutons,
+mais le contenu detaille de la propriete pourrait etre charge dynamiquement.
+
+Informations qui devraient etre disponibles sur la page de detail:
+- Prix detaille
+- Adresse complete
+- Description de la propriete
+- Caracteristiques (chambres, salles de bain, superficie, etc.)
+- Details du terrain
+- Informations sur le quartier
+- Coordonnees du courtier
+- Historique des prix (si disponible)
+- Evaluations municipales
+- Taxes
+- Photos (9 photos selon le lien)
+- Plan d'etage (si disponible)
+- Informations sur les transports en commun
+- Ecoles a proximite
+- Services a proximite
+
+================================================================================
+STRUCTURE TECHNIQUE:
+================================================================================
+
+TYPE DE NAVIGATION:
+- Single Page Application (SPA)
+- Le panneau s'ouvre via JavaScript sans rechargement complet
+- L'URL change avec un hash (#1) pour la navigation
+- Contenu charge dynamiquement via AJAX/fetch
+
+SELECTEURS POSSIBLES:
+- Le panneau de detail est probablement dans un element avec:
+  - role="document" ou role="dialog"
+  - Classes CSS comme "detail-panel", "property-detail", "sidebar", etc.
+  - ID contenant "detail", "property", "listing"
+
+ELEMENTS A SCRAPER:
+1. Titre/Adresse de la propriete
+2. Prix
+3. Caracteristiques principales (chambres, salles de bain, superficie)
+4. Description
+5. Photos (liens vers les images)
+6. Informations supplementaires (onglets Communaute, Fonction Financiere)
+7. Coordonnees du courtier
+8. Carte avec localisation precise
+
+================================================================================
+STRATEGIE DE SCRAPING:
+================================================================================
+
+1. CLIC SUR UNE PROPRIETE:
+   - Trouver le lien vers l'adresse ou le numero Centris
+   - Cliquer dessus pour ouvrir le panneau de detail
+   - Attendre le chargement du contenu dynamique
+
+2. EXTRACTION DES DONNEES:
+   - Attendre que le panneau soit completement charge
+   - Scraper le contenu du panneau de detail
+   - Extraire toutes les sections visibles
+   - Cliquer sur les onglets supplementaires si necessaire (Communaute, Fonction Financiere)
+
+3. NAVIGATION:
+   - Utiliser "Voir le resultat precedent/suivant" pour naviguer entre proprietes
+   - Ou fermer le panneau et cliquer sur la propriete suivante dans la liste
+
+4. GESTION DES PHOTOS:
+   - Cliquer sur "Voir toutes les photos"
+   - Extraire les URLs des images
+   - Télécharger ou sauvegarder les liens
+
+================================================================================
+PROCHAINES ETAPES:
+================================================================================
+
+1. Analyser le HTML complet du panneau de detail pour identifier les selecteurs CSS
+2. Extraire toutes les informations visibles dans le panneau
+3. Tester le clic sur "Voir toutes les photos" pour acceder a la galerie
+4. Tester les onglets "Communaute" et "Fonction Financiere"
+5. Creer des fonctions de scraping specifiques pour la page de detail
+
+================================================================================
+

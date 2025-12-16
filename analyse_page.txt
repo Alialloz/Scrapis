@@ -1,0 +1,240 @@
+================================================================================
+ANALYSE COMPLETE DE LA PAGE CENTRIS MATRIX
+================================================================================
+
+INFORMATIONS VISIBLES SUR LA PAGE:
+
+1. EN-TETE ET NAVIGATION:
+   - Nom du courtier: Myriam Guimont
+   - Agence: RAY HARVEY & ASSOCIES
+   - Email: mguimont@rayharvey.ca
+   - Telephone: 418-849-7777
+   - Menu de navigation: Trouver une maison, Recherches, Sauvegardes/Rejetes, Messages, Mon courtier, Plus, Aide
+
+2. FILTRES ET RECHERCHE:
+   - Filtres disponibles (0 actifs)
+   - Option pour enregistrer la recherche
+   - Options de tri: Date d'envoi, Prix, Municipalite
+   - Options d'affichage: Portal List, Sommaire
+
+3. COMPTEUR DE RESULTATS:
+   - "64 inscriptions totales de la recherche Alerte - 5+ Qc"
+
+4. CARTE INTERACTIVE:
+   - Carte avec outils: Recentrer, Dessiner, Drive Time
+   - Options de zoom: Frontieres, MLS Status, Parcel Characteristics, Tendances
+   - Points d'interet: Arts et divertissement, Services bancaires, Education, etc. (13 categories)
+
+5. LISTE DES PROPRIETES (64 proprietes affichees)
+
+================================================================================
+STRUCTURE D'UNE PROPRIETE (exemple complet):
+================================================================================
+
+Propriete 1:
+- Prix: "750 000 $" (avec badge "Nouvelle annonce")
+- Adresse: "220Z-226BZ Boul. Pierre-Bertrand" (en gras)
+- Localisation: "Quebec (Les Rivieres)"
+- Description: "Autre dans le quartier Neufchatel-Est/Lebourgneuf construit en 1949"
+- Numero Centris: "23326443"
+- Date d'envoi: "2025-12-15"
+- Actions disponibles:
+  * Retirer des favoris
+  * Retirer des possibilites
+  * Retirer des rejetes
+  * Enregistrer comme favori
+  * Enregistrer comme possibilite
+  * Enregistrer comme rejete
+
+Propriete 2:
+- Prix: "1 050 000 $" (avec badge "Nouvelle annonce")
+- Adresse: "164-174 Av. Ruel" (en gras)
+- Localisation: "Quebec (Beauport)"
+- Description: "Autre dans le quartier Chutes-Montmorency construit en 1926"
+- Numero Centris: "16311005"
+- Date d'envoi: "2025-12-10"
+
+Propriete 3:
+- Prix: "995 000 $ + TPS/TVQ" (avec badge "Nouvelle annonce")
+- Adresse: "11032-11040 Boul. Valcartier" (en gras)
+- Localisation: "Quebec (La Haute-Saint-Charles)"
+- Description: "Autre dans le quartier Des Chatels construit en 1940"
+- Numero Centris: "24772371"
+- Date d'envoi: "2025-12-05"
+
+================================================================================
+CHAMPS DE DONNEES IDENTIFIES POUR CHAQUE PROPRIETE:
+================================================================================
+
+1. PRIX
+   Description: Prix de la propriete
+   Format: Montant avec ou sans taxes (TPS/TVQ)
+   Exemples: "750 000 $", "1 050 000 $", "995 000 $ + TPS/TVQ", "1 389 000 $"
+   Badges possibles: "Nouvelle annonce", "Nouveau prix"
+
+2. ADRESSE
+   Description: Adresse complete de la propriete
+   Format: Numero et nom de rue, parfois avec plage (ex: 220Z-226BZ)
+   Exemples: "220Z-226BZ Boul. Pierre-Bertrand", "164-174 Av. Ruel", "19 Rue Ste-Angèle"
+   Note: Souvent affichee en gras
+
+3. VILLE ET ARRONDISSEMENT
+   Description: Localisation geographique
+   Format: "Ville (Arrondissement)"
+   Exemples: "Quebec (Les Rivieres)", "Quebec (Beauport)", "Quebec (La Cite-Limoilou)"
+
+4. QUARTIER
+   Description: Quartier specifique dans l'arrondissement
+   Format: Nom du quartier
+   Exemples: "Neufchatel-Est/Lebourgneuf", "Chutes-Montmorency", "Vieux-Quebec/Cap-Blanc/Colline parlem."
+   Pattern dans le texte: "dans le quartier [NOM] construit en"
+
+5. TYPE DE PROPRIETE
+   Description: Type de batiment
+   Format: Categorie de propriete
+   Exemples: "Autre", "Quintuplex", "Duplex", "Triplex"
+   Pattern dans le texte: "[TYPE] dans le quartier"
+
+6. ANNEE DE CONSTRUCTION
+   Description: Annee de construction du batiment
+   Format: Annee (4 chiffres)
+   Exemples: "1949", "1926", "1940", "1834"
+   Pattern dans le texte: "construit en [ANNEE]"
+
+7. NUMERO CENTRIS
+   Description: Identifiant unique Centris
+   Format: Numero a 8 chiffres
+   Exemples: "23326443", "16311005", "24772371"
+   Pattern dans le texte: "No Centris : [NUMERO]"
+
+8. DATE D'ENVOI
+   Description: Date de publication de l'annonce
+   Format: YYYY-MM-DD
+   Exemples: "2025-12-15", "2025-12-10", "2025-12-05"
+   Pattern dans le texte: "Date d'envoi : [DATE]"
+
+9. STATUT
+   Description: Statut de l'annonce
+   Format: Badge visuel ou absence de badge
+   Valeurs possibles: "Nouvelle annonce", "Nouveau prix", ou aucun badge
+
+10. ACTIONS UTILISATEUR
+    Description: Actions disponibles pour chaque propriete
+    Format: Boutons d'action
+    Actions disponibles:
+    - Enregistrer comme favori
+    - Enregistrer comme possibilite
+    - Enregistrer comme rejete
+    - Retirer des favoris
+    - Retirer des possibilites
+    - Retirer des rejetes
+
+11. LIEN VERS DETAIL
+    Description: URL vers la page de detail de la propriete
+    Format: Lien cliquable (probablement dans l'adresse ou le titre)
+    Note: Non visible dans l'exemple, mais probablement disponible dans le HTML
+
+================================================================================
+PATTERNS REGEX POUR EXTRACTION:
+================================================================================
+
+Prix: ([\d\s]+)\s*\$\s*(?:\+\s*TPS/TVQ)?
+Adresse: (\d+[A-Z]?(?:-\d+[A-Z]?)?\s+[A-Za-zÀ-ÿ\s\-\.]+)
+Numero Centris: No Centris\s*:\s*(\d+)
+Date d'envoi: Date d'envoi\s*:\s*(\d{4}-\d{2}-\d{2})
+Annee construction: construit en (\d{4})
+Quartier: dans le quartier ([^c]+?)(?:construit|$)
+Ville/Arrondissement: Quebec\s*\(([^)]+)\)
+Type: (Autre|Quintuplex|Duplex|Triplex|Maison|Condominium|etc\.)
+
+================================================================================
+ELEMENTS DE L'INTERFACE UTILISATEUR:
+================================================================================
+
+NAVIGATION PRINCIPALE:
+- Trouver une maison
+- Recherches
+- Sauvegardes / Rejetes
+- Messages
+- Mon courtier
+- Plus
+- Aide
+
+FILTRES ET TRI:
+- Filtres (0 actifs)
+- Enregistrer votre recherche
+- Tri par: Date d'envoi, Prix, Municipalite
+- Vue: Portal List, Sommaire
+
+CARTE INTERACTIVE:
+- Outils: Recentrer, Dessiner, Drive Time
+- Zoom: Frontieres, MLS Status, Parcel Characteristics, Tendances
+- Points d'interet: 13 categories (Arts, Banques, Education, etc.)
+
+ACTIONS SUR PROPRIETES:
+- Enregistrer comme favori/possibilite/rejete
+- Retirer des favoris/possibilites/rejetes
+
+PAGINATION:
+- Bouton "Voir plus de resultats" en bas de page
+
+================================================================================
+INFORMATIONS POTENTIELLEMENT DISPONIBLES (non visibles dans l'exemple):
+================================================================================
+
+Ces informations pourraient etre disponibles sur les pages de detail ou dans le HTML:
+- Nombre de chambres
+- Nombre de salles de bain
+- Superficie (pi² ou m²)
+- Superficie du terrain
+- Garage/Parking
+- Photos (liens vers images)
+- Description detaillee
+- Caracteristiques supplementaires
+- Coordonnees du vendeur/courtier
+- Historique des prix
+- Evaluations municipales
+- Taxes municipales
+- Informations sur le quartier
+- Proximite des services
+- Transport en commun
+- Ecoles a proximite
+
+================================================================================
+RESUME:
+================================================================================
+
+La page affiche une liste de 64 proprietes immobilieres avec les informations suivantes:
+
+DONNEES PRINCIPALES PAR PROPRIETE:
+- Prix (avec badges de statut)
+- Adresse complete
+- Ville et arrondissement
+- Quartier
+- Type de propriete
+- Annee de construction
+- Numero Centris (ID unique)
+- Date d'envoi de l'annonce
+- Actions utilisateur (favoris, etc.)
+
+ELEMENTS DE L'INTERFACE:
+- Navigation principale
+- Filtres et options de tri
+- Carte interactive avec outils
+- Liste des proprietes avec pagination
+
+FORMAT DES DONNEES:
+- Les prix sont en dollars canadiens
+- Les dates sont au format YYYY-MM-DD
+- Les adresses incluent parfois des plages (ex: 220Z-226BZ)
+- Les types de proprietes sont categorises (Autre, Quintuplex, etc.)
+
+STRUCTURE HTML PROBABLE:
+- Chaque propriete est probablement dans un conteneur (div, li, ou article)
+- Les adresses sont probablement dans des balises <strong> ou <b>
+- Les prix sont probablement dans des elements avec des classes CSS specifiques
+- Les liens vers les details sont probablement dans des balises <a>
+- Les badges de statut sont probablement des elements <span> ou <div> avec des classes CSS
+
+================================================================================
+
