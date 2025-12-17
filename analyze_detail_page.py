@@ -122,3 +122,4 @@ if __name__ == "__main__":
     snapshot_file = r"C:\Users\danse\.cursor\browser-logs\snapshot-2025-12-16T23-20-02-720Z.log"
     analyze_detail_snapshot(snapshot_file)
 
+

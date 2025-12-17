@@ -67,3 +67,4 @@ Les données sont sauvegardées dans deux formats :
 
 Ce scraper est destiné à un usage personnel et éducatif. Assurez-vous de respecter les conditions d'utilisation du site Centris et les lois sur le web scraping.
 
+
