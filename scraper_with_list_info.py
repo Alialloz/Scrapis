@@ -9,6 +9,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 import json
 import re
+import requests
 from scraper_detail_complete import CentrisDetailScraperComplete
 
 
@@ -175,6 +176,299 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
         
         return list_data
     
+    def extract_photo_urls(self):
+        """
+        Extrait les URLs de toutes les photos de la propriété
+        
+        Returns:
+            list: Liste des URLs des photos
+        """
+        print("\n=== Extraction des URLs des photos ===")
+        
+        photo_urls = []
+        
+        try:
+            # AVANT de cliquer, extraire les IDs des photos depuis les vignettes visibles
+            print("Extraction des IDs de photos depuis le panneau actuel...")
+            html_before = self.driver.page_source
+            
+            # Chercher toutes les URLs d'images matrixmedia dans le panneau
+            import re
+            pattern = r'https?://matrixmedia\.centris\.ca/MediaServer/GetMedia\.ashx\?[^"\'<>\s]+'
+            all_media_before = re.findall(pattern, html_before)
+            
+            photo_ids = []
+            for url in all_media_before:
+                # Extraire le Key (ID de la photo)
+                key_match = re.search(r'Key=(\d+)', url)
+                if key_match:
+                    photo_id = key_match.group(1)
+                    if photo_id not in photo_ids:
+                        photo_ids.append(photo_id)
+            
+            print(f"[INFO] {len(photo_ids)} ID(s) de photos trouvés")
+            
+            # Chercher le lien/bouton "Voir toutes les photos"
+            photo_button_selectors = [
+                "//a[contains(text(), 'Voir toutes les photos')]",
+                "//a[contains(text(), 'Voir toute')]",
+                "//button[contains(text(), 'photo')]",
+                "//*[contains(text(), 'photo') and contains(text(), '(')]",
+            ]
+            
+            photo_button = None
+            for selector in photo_button_selectors:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, selector)
+                    if elements:
+                        photo_button = elements[0]
+                        print(f"[OK] Bouton photos trouvé: {photo_button.text[:50]}")
+                        break
+                except:
+                    continue
+            
+            if not photo_button:
+                print("[INFO] Bouton photos non trouvé, utilisation des IDs trouvés")
+                # Construire les URLs avec les IDs trouvés
+                if photo_ids:
+                    for i, photo_id in enumerate(photo_ids):
+                        # Construire l'URL en haute résolution
+                        # Size=2 pour taille moyenne, Size=4 pour grande taille
+                        photo_url = f"https://matrixmedia.centris.ca/MediaServer/GetMedia.ashx?Key={photo_id}&TableID=1&Type=1&Number={i}&Size=4"
+                        photo_urls.append(photo_url)
+                
+                print(f"[OK] {len(photo_urls)} URLs de photos générées")
+                return photo_urls
+            
+            # Extraire le nombre total de photos depuis le bouton
+            import re
+            total_photos = 9  # Valeur par défaut
+            if photo_button:
+                match = re.search(r'\((\d+)\)', photo_button.text)
+                if match:
+                    total_photos = int(match.group(1))
+                    print(f"[OK] Nombre total de photos annoncé: {total_photos}")
+            
+            # Cliquer sur le bouton pour ouvrir la galerie (nouvelle page)
+            print("Clic sur le bouton photos...")
+            current_window = self.driver.current_window_handle
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", photo_button)
+            time.sleep(0.5)
+            photo_button.click()
+            
+            # Attendre que la nouvelle page/onglet se charge
+            print("Attente du chargement de la galerie...")
+            time.sleep(5)  # Attendre plus longtemps
+            
+            # Vérifier si un nouvel onglet s'est ouvert
+            all_windows = self.driver.window_handles
+            if len(all_windows) > 1:
+                # Basculer vers le nouvel onglet
+                for window in all_windows:
+                    if window != current_window:
+                        self.driver.switch_to.window(window)
+                        break
+                print(f"[OK] Nouvelle page ouverte: {self.driver.current_url[:80]}...")
+                time.sleep(2)
+            else:
+                # C'est la même fenêtre, peut-être un overlay/modal
+                print("[INFO] Galerie ouverte dans la même fenêtre")
+            
+            # NOUVELLE MÉTHODE: Utiliser l'API directement
+            print(f"Extraction des URLs via l'API Centris...")
+            
+            # Extraire le numéro Centris depuis l'URL
+            current_url = self.driver.current_url
+            centris_id_match = re.search(r'/propriete/(\d+)/', current_url)
+            
+            if not centris_id_match:
+                # Essayer depuis les données déjà extraites
+                from urllib.parse import urlparse, parse_qs
+                parsed = urlparse(current_url)
+                if 'etok' in current_url:
+                    centris_id_match = re.search(r'A(\d+)', current_url)
+            
+            high_res_photos = []
+            
+            if centris_id_match:
+                centris_id = centris_id_match.group(1) if centris_id_match.lastindex else centris_id_match.group(0).replace('A', '')
+                print(f"[INFO] Numéro Centris extrait de l'URL: {centris_id}")
+                
+                # Faire une requête POST vers l'API de photos
+                try:
+                    api_url = "https://www.centris.ca/Property/PhotoViewerDataListing"
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Referer': current_url
+                    }
+                    
+                    data = {
+                        'id': centris_id,
+                        'imageSize': 'large'  # Demander les grandes images
+                    }
+                    
+                    response = requests.post(api_url, headers=headers, data=data, timeout=10)
+                    
+                    if response.status_code == 200:
+                        api_data = response.json()
+                        print(f"[OK] Réponse API reçue")
+                        
+                        # Extraire les URLs des photos depuis la réponse
+                        if isinstance(api_data, dict) and 'images' in api_data:
+                            for img_data in api_data['images']:
+                                if 'url' in img_data:
+                                    high_res_photos.append(img_data['url'])
+                        elif isinstance(api_data, dict):
+                            # Chercher les URLs dans toutes les valeurs
+                            for key, value in api_data.items():
+                                if isinstance(value, str) and 'mspublic.centris.ca' in value:
+                                    high_res_photos.append(value)
+                                elif isinstance(value, list):
+                                    for item in value:
+                                        if isinstance(item, str) and 'mspublic.centris.ca' in item:
+                                            high_res_photos.append(item)
+                        
+                        print(f"[OK] {len(high_res_photos)} URLs extraites de l'API")
+                    else:
+                        print(f"[WARNING] API request failed: {response.status_code}")
+                
+                except Exception as e:
+                    print(f"[WARNING] Erreur API: {e}")
+            
+            # Si l'API n'a pas fonctionné, fallback: chercher dans le HTML
+            if len(high_res_photos) == 0:
+                print(f"[INFO] Fallback: recherche dans le HTML...")
+                time.sleep(3)
+                
+                html = self.driver.page_source
+                pattern = r'https?://mspublic\.centris\.ca/media\.ashx\?[^"\'<>\s]+'
+                all_media_urls = re.findall(pattern, html)
+                
+                for url in all_media_urls:
+                    cleaned_url = url.replace('&amp;', '&').rstrip('";,')
+                    if 'w=100' not in cleaned_url and 'h=75' not in cleaned_url:
+                        if 't=pi' in cleaned_url or 'sm=' in cleaned_url:
+                            if cleaned_url not in high_res_photos:
+                                high_res_photos.append(cleaned_url)
+            
+            photo_urls = high_res_photos[:total_photos] if len(high_res_photos) > total_photos else high_res_photos
+            
+            if len(photo_urls) < total_photos:
+                print(f"[WARNING] Seulement {len(photo_urls)} photos trouvées sur {total_photos} annoncées")
+            
+            # Fermer l'onglet de la galerie et revenir à la fenêtre principale
+            if len(self.driver.window_handles) > 1:
+                self.driver.close()
+                self.driver.switch_to.window(current_window)
+                print(f"[OK] Retour à la fenêtre principale")
+            else:
+                # Si c'était un modal, essayer de le fermer
+                try:
+                    close_buttons = self.driver.find_elements(By.XPATH, "//button[contains(@class, 'close') or contains(@aria-label, 'close') or contains(text(), '×')]")
+                    if close_buttons:
+                        close_buttons[0].click()
+                        time.sleep(0.5)
+                except:
+                    pass
+            
+            # Enlever les doublons
+            photo_urls = list(set(photo_urls))
+            
+            # Filtrer pour ne garder QUE les vraies photos de propriété
+            # Les vraies photos viennent de matrixmedia.centris.ca/MediaServer/GetMedia.ashx
+            filtered_urls = []
+            for url in photo_urls:
+                # Garder UNIQUEMENT les URLs du MediaServer qui sont les vraies photos
+                if 'matrixmedia.centris.ca/MediaServer/GetMedia.ashx' in url:
+                    filtered_urls.append(url)
+            
+            # Si on n'a pas trouvé toutes les photos dans le HTML, chercher dans le JavaScript
+            if filtered_urls:
+                print(f"[INFO] {len(filtered_urls)} photos trouvées dans le HTML")
+                
+                # Vérifier si on a toutes les photos
+                import re
+                total_photos_expected = 9
+                if photo_button:
+                    match = re.search(r'\((\d+)\)', photo_button.text)
+                    if match:
+                        total_photos_expected = int(match.group(1))
+                
+                # Si on n'a pas toutes les photos, chercher dans le JavaScript/source
+                if len(filtered_urls) < total_photos_expected:
+                    print(f"[INFO] Recherche de {total_photos_expected - len(filtered_urls)} photos supplémentaires dans le code source...")
+                    
+                    # Chercher dans le code source toutes les URLs de photos avec le pattern
+                    page_source = self.driver.page_source
+                    
+                    # Pattern pour trouver les URLs complètes (avec & ou &amp;)
+                    # Chercher toutes les URLs qui contiennent GetMedia.ashx
+                    pattern = r'https://matrixmedia\.centris\.ca/MediaServer/GetMedia\.ashx\?[^"\'<>\s]+'
+                    all_media_urls = re.findall(pattern, page_source)
+                    
+                    # Nettoyer et dédupliquer
+                    cleaned_urls = []
+                    for url in all_media_urls:
+                        # Remplacer &amp; par &
+                        cleaned_url = url.replace('&amp;', '&')
+                        # Enlever les caractères indésirables à la fin
+                        cleaned_url = cleaned_url.rstrip('";,')
+                        
+                        # Filtrer pour ne garder que les photos (Type=1 généralement)
+                        if 'Type=1' in cleaned_url and cleaned_url not in cleaned_urls:
+                            cleaned_urls.append(cleaned_url)
+                    
+                    # Ajouter les nouvelles URLs
+                    for url in cleaned_urls:
+                        if url not in filtered_urls:
+                            filtered_urls.append(url)
+                    
+                    print(f"[INFO] Total de photos trouvées: {len(filtered_urls)}")
+                
+                photo_urls = filtered_urls
+            
+            # Si toujours pas assez de photos, essayer un filtrage moins strict
+            if not filtered_urls:
+                for url in photo_urls:
+                    # Exclure les images qui sont clairement des icônes, overlays, markers, etc.
+                    exclude_keywords = [
+                        'icon', 'logo', 'button', 'arrow', 'thumb', 'spinner',
+                        'poi_', 'marker_', 'overlay', 'background', 'mapimages',
+                        'anchor', 'pin', 'flag', 'badge', 'banner'
+                    ]
+                    if not any(keyword in url.lower() for keyword in exclude_keywords):
+                        # Vérifier que l'URL contient 'photo' ou 'image' ou 'media'
+                        if any(kw in url.lower() for kw in ['photo', 'image', 'media', 'listing', 'property']):
+                            filtered_urls.append(url)
+                
+                photo_urls = filtered_urls
+            
+            print(f"[OK] {len(photo_urls)} URLs de photos extraites")
+            
+            # Afficher les premières URLs pour vérification
+            if photo_urls:
+                print("\nPremières photos:")
+                for i, url in enumerate(photo_urls[:3], 1):
+                    print(f"  {i}. {url[:80]}...")
+            
+            # Fermer la galerie si elle est ouverte (optionnel)
+            try:
+                close_buttons = self.driver.find_elements(By.XPATH, "//button[contains(@class, 'close') or contains(text(), '×')]")
+                if close_buttons:
+                    close_buttons[0].click()
+                    time.sleep(0.5)
+            except:
+                pass
+            
+        except Exception as e:
+            print(f"[ERREUR] Erreur extraction photos: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        return photo_urls
+    
     def scrape_property_with_list_info(self, index=0):
         """
         Scrape complet: d'abord les infos de la liste, puis les détails du panneau
@@ -199,6 +493,11 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
         
         # Étape 3: Extraire les détails du panneau
         detail_info = self.extract_all_info_complete()
+        
+        # Étape 3.5: Extraire les URLs des photos
+        photo_urls = self.extract_photo_urls()
+        detail_info['photo_urls'] = photo_urls
+        detail_info['nb_photos'] = len(photo_urls)
         
         # Étape 4: Fusionner les données (priorité aux infos de la liste pour certains champs)
         combined_data = detail_info.copy()
