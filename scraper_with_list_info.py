@@ -274,89 +274,99 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
                 # C'est la même fenêtre, peut-être un overlay/modal
                 print("[INFO] Galerie ouverte dans la même fenêtre")
             
-            # NOUVELLE MÉTHODE: Utiliser l'API directement
-            print(f"Extraction des URLs via l'API Centris...")
-            
-            # Extraire le numéro Centris depuis l'URL
-            current_url = self.driver.current_url
-            centris_id_match = re.search(r'/propriete/(\d+)/', current_url)
-            
-            if not centris_id_match:
-                # Essayer depuis les données déjà extraites
-                from urllib.parse import urlparse, parse_qs
-                parsed = urlparse(current_url)
-                if 'etok' in current_url:
-                    centris_id_match = re.search(r'A(\d+)', current_url)
-            
+            # MÉTHODE: Naviguer manuellement dans le carrousel photo par photo
+            print(f"Navigation dans le carrousel pour extraire les {total_photos} photos...")
             high_res_photos = []
             
-            if centris_id_match:
-                centris_id = centris_id_match.group(1) if centris_id_match.lastindex else centris_id_match.group(0).replace('A', '')
-                print(f"[INFO] Numéro Centris extrait de l'URL: {centris_id}")
+            # Attendre que la première photo se charge
+            time.sleep(4)
+            
+            for photo_num in range(total_photos):
+                print(f"  Extraction photo {photo_num + 1}/{total_photos}...")
                 
-                # Faire une requête POST vers l'API de photos
                 try:
-                    api_url = "https://www.centris.ca/Property/PhotoViewerDataListing"
-                    headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'Referer': current_url
-                    }
+                    # Attendre un peu pour être sûr que la photo est chargée
+                    time.sleep(2)
                     
-                    data = {
-                        'id': centris_id,
-                        'imageSize': 'large'  # Demander les grandes images
-                    }
+                    # Extraire l'URL de la photo actuellement affichée
+                    html = self.driver.page_source
+                    soup = BeautifulSoup(html, 'html.parser')
                     
-                    response = requests.post(api_url, headers=headers, data=data, timeout=10)
+                    # Chercher l'image principale affichée (plusieurs patterns)
+                    # La photo active est généralement dans un élément avec une classe spécifique
+                    all_imgs = soup.find_all('img')
                     
-                    if response.status_code == 200:
-                        api_data = response.json()
-                        print(f"[OK] Réponse API reçue")
+                    for img in all_imgs:
+                        src = img.get('src') or img.get('data-src')
+                        if src and 'mspublic.centris.ca/media.ashx' in src:
+                            # Vérifier que c'est une grande image (pas une vignette)
+                            if 'w=100' not in src and 'h=75' not in src:
+                                if 't=pi' in src or 'sm=' in src:
+                                    if src not in high_res_photos:
+                                        high_res_photos.append(src)
+                                        print(f"    [OK] Photo {photo_num + 1}: {src[:80]}...")
+                                        break
+                    
+                    # Après avoir extrait la photo, cliquer sur "Suivant" pour la prochaine
+                    if photo_num < total_photos - 1:
+                        # Essayer plusieurs méthodes pour passer à la photo suivante
+                        next_clicked = False
                         
-                        # Extraire les URLs des photos depuis la réponse
-                        if isinstance(api_data, dict) and 'images' in api_data:
-                            for img_data in api_data['images']:
-                                if 'url' in img_data:
-                                    high_res_photos.append(img_data['url'])
-                        elif isinstance(api_data, dict):
-                            # Chercher les URLs dans toutes les valeurs
-                            for key, value in api_data.items():
-                                if isinstance(value, str) and 'mspublic.centris.ca' in value:
-                                    high_res_photos.append(value)
-                                elif isinstance(value, list):
-                                    for item in value:
-                                        if isinstance(item, str) and 'mspublic.centris.ca' in item:
-                                            high_res_photos.append(item)
+                        # Méthode 1: Touche flèche droite
+                        try:
+                            from selenium.webdriver.common.keys import Keys
+                            from selenium.webdriver.common.action_chains import ActionChains
+                            
+                            actions = ActionChains(self.driver)
+                            actions.send_keys(Keys.ARROW_RIGHT).perform()
+                            next_clicked = True
+                            print(f"    [NEXT] Fleche droite appuyee")
+                            time.sleep(1.5)
+                        except Exception as e:
+                            print(f"    [WARNING] Flèche droite échouée: {e}")
                         
-                        print(f"[OK] {len(high_res_photos)} URLs extraites de l'API")
-                    else:
-                        print(f"[WARNING] API request failed: {response.status_code}")
+                        # Méthode 2: Cliquer sur un bouton suivant
+                        if not next_clicked:
+                            next_button_selectors = [
+                                "//button[contains(@class, 'next')]",
+                                "//button[contains(@class, 'right')]",
+                                "//a[contains(@class, 'next')]",
+                                "//a[contains(@class, 'right')]",
+                                "//*[@role='button' and contains(@aria-label, 'next')]",
+                                "//*[@role='button' and contains(@aria-label, 'Next')]",
+                                "//button[contains(text(), '›')]",
+                                "//button[contains(text(), '→')]",
+                            ]
+                            
+                            for selector in next_button_selectors:
+                                try:
+                                    buttons = self.driver.find_elements(By.XPATH, selector)
+                                    for btn in buttons:
+                                        if btn.is_displayed() and btn.is_enabled():
+                                            btn.click()
+                                            next_clicked = True
+                                            print(f"    [NEXT] Bouton suivant clique")
+                                            time.sleep(1.5)
+                                            break
+                                    if next_clicked:
+                                        break
+                                except:
+                                    continue
+                        
+                        if not next_clicked:
+                            print(f"    [WARNING] Impossible de passer à la photo suivante")
+                            # Essayer quand même de continuer
                 
                 except Exception as e:
-                    print(f"[WARNING] Erreur API: {e}")
+                    print(f"    [ERREUR] Photo {photo_num + 1}: {e}")
+                    continue
             
-            # Si l'API n'a pas fonctionné, fallback: chercher dans le HTML
-            if len(high_res_photos) == 0:
-                print(f"[INFO] Fallback: recherche dans le HTML...")
-                time.sleep(3)
-                
-                html = self.driver.page_source
-                pattern = r'https?://mspublic\.centris\.ca/media\.ashx\?[^"\'<>\s]+'
-                all_media_urls = re.findall(pattern, html)
-                
-                for url in all_media_urls:
-                    cleaned_url = url.replace('&amp;', '&').rstrip('";,')
-                    if 'w=100' not in cleaned_url and 'h=75' not in cleaned_url:
-                        if 't=pi' in cleaned_url or 'sm=' in cleaned_url:
-                            if cleaned_url not in high_res_photos:
-                                high_res_photos.append(cleaned_url)
-            
-            photo_urls = high_res_photos[:total_photos] if len(high_res_photos) > total_photos else high_res_photos
+            photo_urls = high_res_photos
             
             if len(photo_urls) < total_photos:
-                print(f"[WARNING] Seulement {len(photo_urls)} photos trouvées sur {total_photos} annoncées")
+                print(f"[WARNING] Seulement {len(photo_urls)} photos extraites sur {total_photos} annoncées")
+            else:
+                print(f"[OK] {len(photo_urls)} photos extraites avec succès!")
             
             # Fermer l'onglet de la galerie et revenir à la fenêtre principale
             if len(self.driver.window_handles) > 1:
