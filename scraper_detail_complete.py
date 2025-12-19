@@ -352,11 +352,21 @@ class CentrisDetailScraperComplete:
                 data['addenda'] = addenda
                 print(f"[OK] Addenda: {addenda[:100]}...")
             
-            # Source
-            match = re.search(r'Source\s*([^\n]+)', page_text, re.IGNORECASE)
-            if match:
-                data['source'] = match.group(1).strip()
+            # Source (prendre la dernière occurrence, pas "external sources")
+            # Il y a souvent 2 occurrences : "external sources" et "Source\n\nRE/MAX..."
+            # On cherche celle qui est suivie d'un nom d'agence immobilière
+            matches = list(re.finditer(r'(?:^|\n)Source\s*\n+\s*([A-ZÀ-Ÿ][^\n]+(?:INC|IMMOBILIER|COURTIER|AGENCE)[^\n]*)', 
+                                      page_text, re.IGNORECASE | re.MULTILINE))
+            if matches:
+                # Prendre la dernière occurrence
+                data['source'] = matches[-1].group(1).strip()
                 print(f"[OK] Source: {data['source']}")
+            else:
+                # Fallback: chercher n'importe quel "Source" suivi de texte (mais pas "external sources")
+                match = re.search(r'(?<!external )Source\s*\n+\s*([A-ZÀ-Ÿ][^\n]+)', page_text, re.IGNORECASE)
+                if match:
+                    data['source'] = match.group(1).strip()
+                    print(f"[OK] Source (fallback): {data['source']}")
             
         except Exception as e:
             print(f"Erreur extraction inclusions/exclusions: {e}")
