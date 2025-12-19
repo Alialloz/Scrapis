@@ -10,7 +10,7 @@ Configuration de l'API pour le monitoring Centris
 # ============================================================================
 
 # URL de votre API (endpoint pour recevoir les données des propriétés)
-API_ENDPOINT = "https://votre-api.com/api/properties"  # ← MODIFIER ICI
+API_ENDPOINT = "https://api.rayharvey.ca/robot/api/scraping"  # ← MODIFIER ICI
 
 # Headers HTTP pour l'API (optionnel)
 API_HEADERS = {
@@ -55,4 +55,30 @@ SAVE_JSON_LOCALLY = True
 
 # Nombre maximum d'annonces à scraper par cycle (0 = illimité)
 MAX_LISTINGS_PER_CYCLE = 0  # 0 = toutes les nouvelles annonces
+
+# ============================================================================
+# NETTOYAGE AUTOMATIQUE DES FICHIERS JSON
+# ============================================================================
+
+# Activer la suppression automatique des JSON locaux
+AUTO_CLEANUP_ENABLED = True  # True = supprimer automatiquement les JSON
+
+# Jour de la semaine pour le nettoyage (0=Lundi, 6=Dimanche)
+CLEANUP_DAY = 6  # Dimanche
+
+# Heure du nettoyage (0-23)
+CLEANUP_HOUR = 23  # 23h00 (11 PM)
+
+# Garder les fichiers de cette semaine (True) ou tout supprimer (False)
+KEEP_CURRENT_WEEK = True  # True = garder les JSON de la semaine en cours
+
+# Fichiers à ne jamais supprimer (CRITIQUE !)
+PROTECTED_FILES = [
+    'scraped_properties.json',       # ⚠️ CRITIQUE - Liste des numéros Centris déjà scrapés
+    'monitoring_stats.json',          # Statistiques de monitoring
+    'property_with_list_info.json'    # Fichier de test
+]
+
+# Créer une sauvegarde du fichier scraped_properties.json
+AUTO_BACKUP_SCRAPED_IDS = True  # Sauvegarde automatique avant nettoyage
 

@@ -9,7 +9,8 @@ import sys
 import time
 import json
 import os
-from datetime import datetime
+import glob
+from datetime import datetime, timedelta
 from scraper_monitor import CentrisMonitor
 
 # Importer la configuration
@@ -23,7 +24,13 @@ try:
         STORAGE_FILE,
         DELAY_BETWEEN_LISTINGS,
         SAVE_JSON_LOCALLY,
-        MAX_LISTINGS_PER_CYCLE
+        MAX_LISTINGS_PER_CYCLE,
+        AUTO_CLEANUP_ENABLED,
+        CLEANUP_DAY,
+        CLEANUP_HOUR,
+        KEEP_CURRENT_WEEK,
+        PROTECTED_FILES,
+        AUTO_BACKUP_SCRAPED_IDS
     )
 except ImportError:
     print("[ERREUR] Fichier config_api.py introuvable!")
@@ -45,6 +52,13 @@ class CentrisProductionMonitor(CentrisMonitor):
         self.delay_between_listings = DELAY_BETWEEN_LISTINGS
         self.save_json_locally = SAVE_JSON_LOCALLY
         self.max_listings_per_cycle = MAX_LISTINGS_PER_CYCLE
+        self.auto_cleanup_enabled = AUTO_CLEANUP_ENABLED
+        self.cleanup_day = CLEANUP_DAY
+        self.cleanup_hour = CLEANUP_HOUR
+        self.keep_current_week = KEEP_CURRENT_WEEK
+        self.protected_files = PROTECTED_FILES
+        self.auto_backup_scraped_ids = AUTO_BACKUP_SCRAPED_IDS
+        self.last_cleanup_date = None
         
     def send_to_api(self, property_data):
         """
@@ -213,6 +227,135 @@ class CentrisProductionMonitor(CentrisMonitor):
         except Exception as e:
             print(f"[WARNING] Impossible de sauvegarder les stats: {e}")
     
+    def backup_scraped_ids(self):
+        """
+        Crée une sauvegarde du fichier scraped_properties.json
+        """
+        if not self.auto_backup_scraped_ids:
+            return
+        
+        try:
+            if os.path.exists(self.storage_file):
+                # Créer un nom de fichier avec la date
+                backup_name = f"scraped_properties_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                
+                # Copier le fichier
+                import shutil
+                shutil.copy2(self.storage_file, backup_name)
+                
+                print(f"[BACKUP] Sauvegarde creee: {backup_name}")
+                
+                # Garder seulement les 10 dernières sauvegardes
+                backup_files = sorted(glob.glob("scraped_properties_backup_*.json"))
+                if len(backup_files) > 10:
+                    for old_backup in backup_files[:-10]:
+                        try:
+                            os.remove(old_backup)
+                            print(f"[BACKUP] Ancienne sauvegarde supprimee: {old_backup}")
+                        except:
+                            pass
+                            
+        except Exception as e:
+            print(f"[WARNING] Impossible de creer la sauvegarde: {e}")
+    
+    def cleanup_json_files(self):
+        """
+        Supprime les fichiers JSON des propriétés selon la configuration
+        ⚠️ NE SUPPRIME JAMAIS scraped_properties.json
+        """
+        if not self.auto_cleanup_enabled:
+            return
+        
+        now = datetime.now()
+        
+        # Vérifier si c'est le bon jour et la bonne heure
+        if now.weekday() != self.cleanup_day:
+            return
+        
+        if now.hour != self.cleanup_hour:
+            return
+        
+        # Vérifier si on a déjà fait le nettoyage aujourd'hui
+        if self.last_cleanup_date and self.last_cleanup_date.date() == now.date():
+            return
+        
+        print(f"\n{'='*80}")
+        print(f"NETTOYAGE AUTOMATIQUE DES FICHIERS JSON")
+        print(f"{'='*80}")
+        
+        # Créer une sauvegarde du fichier scraped_properties.json AVANT le nettoyage
+        self.backup_scraped_ids()
+        
+        try:
+            # Trouver tous les fichiers property_*.json
+            pattern = "property_*.json"
+            json_files = glob.glob(pattern)
+            
+            if not json_files:
+                print("[INFO] Aucun fichier JSON a nettoyer")
+                return
+            
+            # Calculer la date limite (début de la semaine si KEEP_CURRENT_WEEK)
+            if self.keep_current_week:
+                # Début de la semaine (lundi)
+                days_since_monday = now.weekday()
+                week_start = now - timedelta(days=days_since_monday)
+                week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+                print(f"[INFO] Conservation des fichiers depuis le {week_start.strftime('%Y-%m-%d')}")
+            
+            deleted_count = 0
+            kept_count = 0
+            
+            for json_file in json_files:
+                # ⚠️ PROTECTION ABSOLUE - Ne JAMAIS supprimer ces fichiers
+                if json_file in self.protected_files:
+                    kept_count += 1
+                    print(f"[PROTEGE] {json_file} conserve (fichier protege)")
+                    continue
+                
+                # Double vérification pour scraped_properties.json
+                if 'scraped_properties' in json_file:
+                    kept_count += 1
+                    print(f"[PROTEGE] {json_file} conserve (liste des IDs)")
+                    continue
+                
+                try:
+                    # Vérifier la date de modification du fichier
+                    file_time = datetime.fromtimestamp(os.path.getmtime(json_file))
+                    
+                    # Décider si on supprime
+                    should_delete = False
+                    
+                    if self.keep_current_week:
+                        # Supprimer seulement les fichiers d'avant la semaine en cours
+                        if file_time < week_start:
+                            should_delete = True
+                    else:
+                        # Supprimer tous les fichiers
+                        should_delete = True
+                    
+                    if should_delete:
+                        os.remove(json_file)
+                        deleted_count += 1
+                        print(f"[SUPPRIME] {json_file} (date: {file_time.strftime('%Y-%m-%d %H:%M')})")
+                    else:
+                        kept_count += 1
+                        
+                except Exception as e:
+                    print(f"[WARNING] Impossible de supprimer {json_file}: {e}")
+            
+            print(f"\n[OK] Nettoyage termine:")
+            print(f"  - {deleted_count} fichiers supprimes")
+            print(f"  - {kept_count} fichiers conserves")
+            
+            # Marquer la date du dernier nettoyage
+            self.last_cleanup_date = now
+            
+        except Exception as e:
+            print(f"[ERREUR] Erreur durant le nettoyage: {e}")
+            import traceback
+            traceback.print_exc()
+    
     def run_continuous_monitoring(self, interval_minutes=None):
         """
         Exécute le monitoring en continu
@@ -225,6 +368,9 @@ class CentrisProductionMonitor(CentrisMonitor):
         print(f"URL: {MATRIX_URL}")
         print(f"API: {API_ENDPOINT}")
         print(f"Intervalle: {interval_minutes} minutes")
+        if self.auto_cleanup_enabled:
+            days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
+            print(f"Nettoyage auto: {days[self.cleanup_day]} a {self.cleanup_hour}h")
         print(f"{'='*80}")
         
         cycle_number = 0
@@ -233,6 +379,10 @@ class CentrisProductionMonitor(CentrisMonitor):
             while True:
                 cycle_number += 1
                 print(f"\n>>> CYCLE #{cycle_number} <<<")
+                
+                # Vérifier si c'est l'heure du nettoyage
+                if self.auto_cleanup_enabled:
+                    self.cleanup_json_files()
                 
                 start_time = time.time()
                 
