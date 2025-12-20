@@ -424,6 +424,9 @@ class CentrisDetailScraperComplete:
             'salles_bain': None,
             'superficie_habitable': None,
             'superficie_terrain': None,
+            'evaluation_terrain': None,
+            'evaluation_batiment': None,
+            'evaluation_totale': None,
             'nb_photos': 0,
             
             # Courtier
@@ -485,6 +488,26 @@ class CentrisDetailScraperComplete:
             if sup_match:
                 property_data['superficie_terrain'] = sup_match.group(1).replace(' ', '').replace(',', '').strip()
                 print(f"[OK] Superficie terrain: {property_data['superficie_terrain']} pi²")
+            
+            # Évaluations municipales
+            eval_terrain_match = re.search(r'Éval\.\s+terrain\s*([\d\s]+)\s*\$', page_text, re.IGNORECASE)
+            if eval_terrain_match:
+                property_data['evaluation_terrain'] = eval_terrain_match.group(1).replace(' ', '').strip()
+                print(f"[OK] Evaluation terrain: {property_data['evaluation_terrain']} $")
+            
+            eval_batiment_match = re.search(r'Éval\.\s+bâtiment\s*([\d\s]+)\s*\$', page_text, re.IGNORECASE)
+            if eval_batiment_match:
+                property_data['evaluation_batiment'] = eval_batiment_match.group(1).replace(' ', '').strip()
+                print(f"[OK] Evaluation batiment: {property_data['evaluation_batiment']} $")
+            
+            # Calcul de l'évaluation totale si les deux sont disponibles
+            if property_data['evaluation_terrain'] and property_data['evaluation_batiment']:
+                try:
+                    total = int(property_data['evaluation_terrain']) + int(property_data['evaluation_batiment'])
+                    property_data['evaluation_totale'] = str(total)
+                    print(f"[OK] Evaluation totale (calculee): {property_data['evaluation_totale']} $")
+                except:
+                    pass
             
             photo_match = re.search(r'photo[s]?\s*\((\d+)\)', page_text, re.IGNORECASE)
             if photo_match:
