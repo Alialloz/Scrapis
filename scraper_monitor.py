@@ -7,6 +7,7 @@ Scraper Monitor - Détecte et scrape les nouvelles annonces Centris
 import time
 import json
 import os
+import re
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -14,6 +15,7 @@ from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
 import requests
+from bs4 import BeautifulSoup
 from scraper_with_list_info import CentrisScraperWithListInfo
 
 
@@ -229,42 +231,68 @@ class CentrisMonitor:
             scraper.driver.get(self.url)
             time.sleep(5)
             
-            # Faire défiler pour charger les annonces
+            # Faire défiler pour charger toutes les annonces
             print(f"Defilement de la page...")
             scraper.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
+            scraper.driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(1)
             
-            # Trouver l'index de cette annonce dans la liste
-            # On va scraper toutes les annonces et trouver celle qui correspond
-            all_containers = scraper.driver.find_elements(
-                By.XPATH, 
-                "//div[contains(@class, 'property') or contains(@id, 'property') or contains(@class, 'result')]"
-            )
+            # APPROCHE SIMPLE: Construire un mapping ID Centris -> Index
+            # En parcourant la page source
+            print(f"Construction du mapping des annonces...")
+            html = scraper.driver.page_source
+            soup = BeautifulSoup(html, 'html.parser')
             
-            print(f"[INFO] {len(all_containers)} conteneurs trouves, recherche du No Centris {centris_id}...")
+            # Trouver tous les conteneurs d'annonces
+            all_text_blocks = soup.find_all(string=re.compile(r'No\s*Centris', re.IGNORECASE))
             
-            target_index = None
-            for index, container in enumerate(all_containers):
-                try:
-                    container_text = container.text
-                    if centris_id in container_text:
-                        target_index = index
-                        print(f"[OK] Annonce trouvee a l'index {index}")
-                        break
-                except:
-                    continue
+            centris_to_index = {}
+            index = 0
             
-            if target_index is not None:
-                # Scraper cette propriété spécifique
-                property_data = scraper.scrape_property_with_list_info(index=target_index)
-                
-                scraper.close()
-                
-                return property_data
-            else:
-                print(f"[WARNING] Annonce {centris_id} non trouvee dans les {len(all_containers)} conteneurs")
+            for text_block in all_text_blocks:
+                # Extraire le numéro Centris de ce bloc
+                parent = text_block.parent
+                if parent:
+                    parent_text = parent.get_text()
+                    match = re.search(r'No\s*Centris\s*[:\-]?\s*(\d+)', parent_text, re.IGNORECASE)
+                    if match:
+                        found_id = match.group(1)
+                        if found_id not in centris_to_index:
+                            centris_to_index[found_id] = index
+                            index += 1
+                            print(f"  [{index}] No Centris: {found_id}")
+            
+            print(f"\n[INFO] {len(centris_to_index)} annonces mappees")
+            
+            # Trouver l'index de notre annonce cible
+            if centris_id not in centris_to_index:
+                print(f"[ERREUR] Annonce {centris_id} non trouvee dans le mapping")
                 scraper.close()
                 return None
+            
+            target_index = centris_to_index[centris_id]
+            print(f"[OK] Annonce {centris_id} trouvee a l'index {target_index}")
+            
+            # Utiliser l'approche simple par index qui fonctionne
+            property_data = scraper.scrape_property_with_list_info(index=target_index)
+            
+            # Vérifier que le numéro Centris correspond bien
+            if property_data:
+                scraped_centris = property_data.get('numero_centris')
+                if scraped_centris != centris_id:
+                    print(f"[WARNING] Numero Centris ne correspond pas!")
+                    print(f"  Attendu: {centris_id}")
+                    print(f"  Obtenu: {scraped_centris}")
+                    # Forcer le bon numéro Centris
+                    property_data['numero_centris'] = centris_id
+                    if property_data.get('_donnees_liste'):
+                        property_data['_donnees_liste']['numero_centris'] = centris_id
+                else:
+                    print(f"[OK] Numero Centris verifie: {scraped_centris}")
+            
+            scraper.close()
+            return property_data
             
         except Exception as e:
             print(f"[ERREUR] Erreur scraping annonce {centris_id}: {e}")

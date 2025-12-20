@@ -288,3 +288,4 @@ Le scraper Centris est maintenant **100% fonctionnel** et prêt à être déploy
 
 **Toutes les données sont extraites correctement, y compris la source de l'agence immobilière ! 🚀**
 
+
