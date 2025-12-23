@@ -41,7 +41,7 @@ except ImportError:
 class CentrisProductionMonitor(CentrisMonitor):
     """Version production du moniteur avec configuration personnalisée"""
     
-    def __init__(self, min_date='2025-10-29'):
+    def __init__(self, min_date='2025-12-21'):
         super().__init__(
             url=MATRIX_URL,
             api_endpoint=API_ENDPOINT,
