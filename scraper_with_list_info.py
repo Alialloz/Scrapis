@@ -383,8 +383,14 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
                 except:
                     pass
             
-            # Enlever les doublons
-            photo_urls = list(set(photo_urls))
+            # Enlever les doublons TOUT EN PRÉSERVANT L'ORDRE
+            seen = set()
+            unique_photo_urls = []
+            for url in photo_urls:
+                if url not in seen:
+                    seen.add(url)
+                    unique_photo_urls.append(url)
+            photo_urls = unique_photo_urls
             
             # Filtrer pour ne garder QUE les vraies photos de propriété
             # Les vraies photos viennent de matrixmedia.centris.ca/MediaServer/GetMedia.ashx
