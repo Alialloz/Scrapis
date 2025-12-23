@@ -24,7 +24,7 @@ class CentrisMonitor:
     Moniteur pour détecter les nouvelles annonces et les scraper automatiquement
     """
     
-    def __init__(self, url, api_endpoint=None, storage_file='scraped_properties.json', min_date='2025-12-21'):
+    def __init__(self, url, api_endpoint=None, storage_file='scraped_properties.json', min_date='2025-12-20'):
         """
         Initialise le moniteur
         

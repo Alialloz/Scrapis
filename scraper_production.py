@@ -41,7 +41,7 @@ except ImportError:
 class CentrisProductionMonitor(CentrisMonitor):
     """Version production du moniteur avec configuration personnalisée"""
     
-    def __init__(self, min_date='2025-12-21'):
+    def __init__(self, min_date='2025-12-20'):
         super().__init__(
             url=MATRIX_URL,
             api_endpoint=API_ENDPOINT,
@@ -437,7 +437,7 @@ def main():
     print(f"[OK] Date minimale: 2025-10-29 (annonces anterieures ignorees)")
     
     # Créer le moniteur
-    monitor = CentrisProductionMonitor(min_date='2025-10-29')
+    monitor = CentrisProductionMonitor(min_date='2025-12-20')
     
     # Lancer le monitoring continu
     print("\n[INFO] Lancement du monitoring continu...")
