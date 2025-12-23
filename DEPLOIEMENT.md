@@ -1,363 +1,421 @@
-# 🚀 GUIDE DE DÉPLOIEMENT - SCRAPER CENTRIS
+# 🚀 GUIDE DE DÉPLOIEMENT - Scraper Centris sur DigitalOcean
 
-## 📋 Pré-requis
+## 📋 Prérequis
 
-- ✅ Python 3.8 ou supérieur installé
-- ✅ Toutes les dépendances installées (`pip install -r requirements.txt`)
-- ✅ ChromeDriver compatible avec votre version de Chrome
-- ✅ URL de votre API prête
+Vous devez avoir :
+- ✅ Un Droplet DigitalOcean créé (Ubuntu 22.04/24.04)
+- ✅ L'adresse IP de votre Droplet
+- ✅ Accès SSH (clé SSH ou mot de passe root)
+- ✅ Votre code en local
 
 ---
 
-## 🔧 ÉTAPE 1 : Configuration de l'API
+## 🎯 DÉPLOIEMENT EN 5 ÉTAPES
 
-### 1.1 Éditer `config_api.py`
+### **ÉTAPE 1 : Connexion au serveur**
 
-Ouvrez le fichier `config_api.py` et configurez :
+```bash
+# Remplacez VOTRE_IP par l'IP de votre Droplet
+ssh root@VOTRE_IP
+```
 
+**Si première connexion :**
+```
+Are you sure you want to continue connecting (yes/no)? 
+# Tapez: yes
+```
+
+---
+
+### **ÉTAPE 2 : Télécharger le script d'installation**
+
+```bash
+# Sur le serveur
+cd /root
+wget https://raw.githubusercontent.com/VOTRE-REPO/Scrapis/main/install_server.sh
+chmod +x install_server.sh
+```
+
+**OU** si vous n'avez pas Git/GitHub, copiez le contenu du fichier `install_server.sh` :
+
+```bash
+# Sur le serveur
+nano install_server.sh
+# Collez le contenu du fichier install_server.sh
+# Ctrl+O pour sauvegarder, Ctrl+X pour quitter
+chmod +x install_server.sh
+```
+
+---
+
+### **ÉTAPE 3 : Exécuter l'installation (10-15 minutes)**
+
+```bash
+sudo ./install_server.sh
+```
+
+**Ce script installe automatiquement :**
+- ✅ Python 3.12
+- ✅ Google Chrome
+- ✅ ChromeDriver
+- ✅ Toutes les dépendances système
+- ✅ Service systemd
+- ✅ Configuration des logs
+
+☕ **Prenez un café, ça prend ~10 minutes...**
+
+---
+
+### **ÉTAPE 4 : Déployer votre code**
+
+#### **Option A : Avec Git (recommandé)**
+
+```bash
+cd /opt/scraper-centris
+git clone https://github.com/VOTRE-REPO/Scrapis.git .
+```
+
+#### **Option B : Upload manuel depuis votre PC**
+
+```bash
+# Sur VOTRE PC (pas le serveur)
+cd /chemin/vers/Scrapis
+scp -r *.py *.txt root@VOTRE_IP:/opt/scraper-centris/
+```
+
+**Vérifiez que les fichiers sont là :**
+```bash
+# Sur le serveur
+ls -la /opt/scraper-centris/
+# Vous devriez voir: scraper_production.py, config_api.py, etc.
+```
+
+---
+
+### **ÉTAPE 5 : Installer les dépendances Python**
+
+```bash
+cd /opt/scraper-centris
+pip3.12 install -r requirements.txt
+```
+
+**Si requirements.txt n'existe pas :**
+```bash
+pip3.12 install selenium beautifulsoup4 requests webdriver-manager pandas
+```
+
+---
+
+## ⚙️ CONFIGURATION
+
+### **Vérifier config_api.py**
+
+```bash
+nano /opt/scraper-centris/config_api.py
+```
+
+**Vérifiez que l'URL API est correcte :**
 ```python
-# URL de votre API
-API_ENDPOINT = "https://votre-api.com/api/properties"  # ← MODIFIER ICI
-
-# Headers (si authentification requise)
-API_HEADERS = {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer VOTRE_TOKEN_ICI',  # ← Décommenter et configurer
-}
+API_ENDPOINT = "https://api.rayharvey.ca/robot/api/scraping"  # ✓ Bon
 ```
 
-### 1.2 Tester la connexion à l'API
-
-```bash
-python test_api.py
-```
-
-Ce script va :
-- Vérifier que l'API est accessible
-- Envoyer un JSON de test
-- Afficher la réponse
+`Ctrl+X` pour quitter (pas besoin de modifier si déjà correct)
 
 ---
 
-## 🧪 ÉTAPE 2 : Test avec une annonce
+## 🚀 LANCEMENT DU SERVICE
 
-Avant de lancer le monitoring continu, testez avec une seule annonce :
-
-```bash
-python scraper_with_list_info.py
-```
-
-Vérifiez que :
-- ✅ Le scraping fonctionne
-- ✅ Les 9 photos sont extraites
-- ✅ La source est correcte (pas "s.")
-- ✅ Le JSON est complet
-
----
-
-## ▶️ ÉTAPE 3 : Lancement du Monitoring Continu
-
-### Windows
-
-Double-cliquez sur `start_monitoring.bat` ou :
-
-```cmd
-python scraper_production.py
-```
-
-### Linux/Mac
+### **Démarrer le scraper**
 
 ```bash
-chmod +x start_monitoring.sh
-./start_monitoring.sh
+systemctl start scraper-centris
 ```
 
-ou :
+### **Activer le démarrage automatique**
 
 ```bash
-python3 scraper_production.py
+systemctl enable scraper-centris
+```
+
+### **Vérifier que ça tourne**
+
+```bash
+systemctl status scraper-centris
+```
+
+**Résultat attendu :**
+```
+● scraper-centris.service - Scraper Centris - Monitoring automatique
+   Active: active (running) since...
 ```
 
 ---
 
-## 🔄 Fonctionnement du Monitoring
+## 📊 SURVEILLANCE
 
-### Cycle Automatique
-
-Le système va :
-1. **Toutes les heures** : Scanner la page Matrix
-2. **Détecter** les nouvelles annonces (via numéro Centris)
-3. **Scraper** chaque nouvelle annonce (60 sec/annonce)
-4. **Sauvegarder** localement dans `property_XXXXXXXX.json`
-5. **Envoyer** le JSON complet à votre API
-6. **Enregistrer** l'ID dans `scraped_properties.json`
-7. **Attendre** 1 heure avant le prochain cycle
-
-### Logs
-
-Le système affiche en temps réel :
-- Nombre d'annonces trouvées
-- Nouvelles annonces détectées
-- Progression du scraping
-- Statut de l'envoi à l'API
-- Résumé du cycle
-
----
-
-## 📊 Fichiers Générés
-
-| Fichier | Description |
-|---------|-------------|
-| `scraped_properties.json` | Liste des IDs déjà scrapés avec dates |
-| `property_XXXXXXXX.json` | Données complètes de chaque propriété |
-| `monitoring_stats.json` | Statistiques des 100 derniers cycles |
-
----
-
-## ⚙️ Configuration Avancée
-
-### Modifier l'intervalle de monitoring
-
-Dans `config_api.py` :
-
-```python
-MONITORING_INTERVAL = 30  # Minutes (30 = toutes les 30 minutes)
-```
-
-### Désactiver la sauvegarde locale
-
-```python
-SAVE_JSON_LOCALLY = False  # Ne pas sauvegarder les JSON localement
-```
-
-### Limiter le nombre d'annonces par cycle
-
-```python
-MAX_LISTINGS_PER_CYCLE = 5  # Scraper max 5 annonces par cycle
-```
-
----
-
-## 🖥️ DÉPLOIEMENT EN PRODUCTION
-
-### Option 1 : Service Windows
-
-1. Créer une tâche planifiée Windows :
-   - Ouvrir "Planificateur de tâches"
-   - Créer une tâche de base
-   - Action : `python.exe C:\chemin\vers\scraper_production.py`
-   - Déclencheur : Au démarrage du système
-   - Options : Redémarrer en cas d'échec
-
-### Option 2 : Service Linux (systemd)
-
-Créer `/etc/systemd/system/centris-scraper.service` :
-
-```ini
-[Unit]
-Description=Centris Scraper Monitoring Service
-After=network.target
-
-[Service]
-Type=simple
-User=votre-utilisateur
-WorkingDirectory=/chemin/vers/Scrapis
-ExecStart=/usr/bin/python3 scraper_production.py
-Restart=always
-RestartSec=60
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Activer et démarrer :
-```bash
-sudo systemctl enable centris-scraper
-sudo systemctl start centris-scraper
-sudo systemctl status centris-scraper
-```
-
-### Option 3 : Cron (Linux/Mac)
-
-Pour un monitoring toutes les heures :
+### **Voir les logs en temps réel**
 
 ```bash
-crontab -e
+tail -f /var/log/scraper-centris.log
 ```
 
-Ajouter :
-```cron
-0 * * * * cd /chemin/vers/Scrapis && python3 scraper_production.py --single-cycle
-```
+`Ctrl+C` pour quitter
 
-### Option 4 : Docker
+### **Voir les erreurs**
 
-Créer `Dockerfile` :
-
-```dockerfile
-FROM python:3.9-slim
-
-# Installer Chrome
-RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    chromium \
-    chromium-driver
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-CMD ["python", "scraper_production.py"]
-```
-
-Build et run :
 ```bash
-docker build -t centris-scraper .
-docker run -d --restart always centris-scraper
+tail -f /var/log/scraper-centris-error.log
+```
+
+### **Dernières 50 lignes**
+
+```bash
+tail -50 /var/log/scraper-centris.log
 ```
 
 ---
 
-## 🔍 Monitoring et Maintenance
+## 🔧 COMMANDES UTILES
 
-### Vérifier que le service tourne
-
+### **Redémarrer le service**
 ```bash
-# Linux
-ps aux | grep scraper_production
-
-# Windows
-tasklist | findstr python
+systemctl restart scraper-centris
 ```
 
-### Consulter les logs en temps réel
-
-Le script affiche tout dans la console. Pour rediriger vers un fichier :
-
+### **Arrêter le service**
 ```bash
-python scraper_production.py > logs/scraper.log 2>&1
+systemctl stop scraper-centris
 ```
 
-### Consulter les statistiques
-
+### **Voir le statut**
 ```bash
-cat monitoring_stats.json
+systemctl status scraper-centris
 ```
 
-### Réinitialiser le système
-
-Pour tout rescraper depuis le début :
-
+### **Désactiver le démarrage automatique**
 ```bash
-rm scraped_properties.json
+systemctl disable scraper-centris
+```
+
+### **Voir les logs avec filtres**
+```bash
+# Seulement les erreurs
+grep -i error /var/log/scraper-centris.log
+
+# Seulement les succès API
+grep -i "API.*succes" /var/log/scraper-centris.log
+
+# Statistiques des cycles
+grep -i "RESUME DU CYCLE" /var/log/scraper-centris.log -A 6
 ```
 
 ---
 
-## 🐛 Dépannage
+## 🔄 MISE À JOUR DU CODE
 
-### Problème : Le monitoring ne démarre pas
+### **Méthode 1 : Avec Git**
 
-**Vérifications :**
-- Python installé ? `python --version`
-- Dépendances installées ? `pip install -r requirements.txt`
-- ChromeDriver installé ? Le script l'installe automatiquement
-
-### Problème : L'API ne reçoit pas les données
-
-**Vérifications :**
-1. L'API_ENDPOINT est-il correct dans `config_api.py` ?
-2. L'API est-elle accessible ? `curl https://votre-api.com/api/properties`
-3. Les logs montrent-ils des erreurs ?
-4. Testez avec `test_api.py`
-
-### Problème : Erreur "No such element"
-
-**Solution :**
-- La page Matrix a peut-être changé de structure
-- Augmentez les délais d'attente dans le code
-- Vérifiez que la page se charge correctement
-
-### Problème : ChromeDriver incompatible
-
-**Solution :**
 ```bash
-pip install --upgrade selenium webdriver-manager
+cd /opt/scraper-centris
+git pull
+systemctl restart scraper-centris
 ```
 
-### Problème : Mémoire insuffisante
+### **Méthode 2 : Avec le script deploy.sh**
 
-**Solution :**
-- Limiter le nombre d'annonces par cycle dans `config_api.py`
-- Fermer Chrome entre chaque scraping (déjà fait)
+**Sur VOTRE PC (pas le serveur) :**
 
----
+1. Éditez `deploy.sh` :
+```bash
+nano deploy.sh
+# Changez SERVER_IP="VOTRE_IP_SERVEUR" avec la vraie IP
+```
 
-## 📞 Support
+2. Exécutez :
+```bash
+chmod +x deploy.sh
+./deploy.sh
+```
 
-### Logs importants à fournir :
-
-1. Sortie console complète
-2. Contenu de `scraped_properties.json`
-3. Un fichier `property_XXXXXXXX.json` exemple
-4. Version de Python : `python --version`
-5. Version de Chrome
-
----
-
-## 🎯 Checklist de Déploiement
-
-Avant de mettre en production :
-
-- [ ] API configurée dans `config_api.py`
-- [ ] Test réussi avec `scraper_with_list_info.py`
-- [ ] Test API réussi avec `test_api.py`
-- [ ] Intervalle de monitoring configuré (60 minutes)
-- [ ] Service/tâche planifiée configuré
-- [ ] Logs redirigés vers un fichier
-- [ ] Mécanisme de redémarrage automatique en place
-- [ ] Monitoring des erreurs en place
-- [ ] Espace disque suffisant pour les JSON
+Le script :
+- ✅ Crée une archive du code
+- ✅ L'envoie sur le serveur
+- ✅ La décompresse
+- ✅ Redémarre le service
 
 ---
 
-## 📈 Estimation des Ressources
+## 🐛 DÉPANNAGE
 
-### Espace Disque
+### **Le service ne démarre pas**
 
-- ~10 KB par annonce (JSON)
-- Si 100 nouvelles annonces/mois = 1 MB/mois
-- Photos non téléchargées (seulement URLs)
+```bash
+# Voir les logs détaillés
+journalctl -u scraper-centris -n 50
 
-### Mémoire
+# Tester manuellement
+cd /opt/scraper-centris
+python3.12 scraper_production.py
+```
 
-- ~200-300 MB pendant le scraping
-- ~50 MB au repos
+### **Erreur "Chrome not found"**
 
-### CPU
+```bash
+# Vérifier Chrome
+google-chrome --version
 
-- Pics à 50% pendant le scraping
-- ~0% au repos
+# Réinstaller si besoin
+sudo ./install_server.sh
+```
 
-### Bande Passante
+### **Erreur "Permission denied"**
 
-- ~1 MB par annonce scrapée
-- ~60 MB pour scraper 60 annonces
+```bash
+# Donner les permissions
+chmod +x /opt/scraper-centris/*.py
+chmod +x /opt/scraper-centris/*.sh
+```
+
+### **Le scraper ne trouve pas les annonces**
+
+```bash
+# Vérifier la connexion
+curl https://api.rayharvey.ca/robot/api/scraping
+
+# Tester manuellement
+cd /opt/scraper-centris
+python3.12 test_api.py
+```
+
+### **Espace disque plein**
+
+```bash
+# Voir l'espace disque
+df -h
+
+# Nettoyer les fichiers JSON anciens
+cd /opt/scraper-centris
+rm property_*.json  # Garde scraped_properties.json !
+
+# Nettoyer les logs (attention !)
+> /var/log/scraper-centris.log
+```
 
 ---
 
-## ✅ Le Système Est Prêt !
+## 📈 MONITORING & MAINTENANCE
 
-Une fois configuré, le système tournera **automatiquement 24/7** et :
-- ✅ Détectera les nouvelles annonces toutes les heures
-- ✅ Scrapera automatiquement toutes les données
-- ✅ Enverra le JSON complet à votre API
-- ✅ Ne re-scrapera jamais une annonce déjà traitée
+### **Vérification quotidienne**
 
-**Le déploiement est simple et robuste ! 🚀**
+```bash
+# Statut rapide
+systemctl status scraper-centris
 
+# Dernière activité
+tail -20 /var/log/scraper-centris.log
+```
 
+### **Vérification hebdomadaire**
+
+```bash
+# Espace disque
+df -h
+
+# RAM utilisée
+free -h
+
+# Nombre d'annonces scrapées
+wc -l /opt/scraper-centris/scraped_properties.json
+```
+
+### **Backup automatique**
+
+Le système fait déjà des backups automatiques de `scraped_properties.json`.
+
+**Pour faire un backup manuel :**
+```bash
+cd /opt/scraper-centris
+cp scraped_properties.json scraped_properties_backup_$(date +%Y%m%d).json
+```
+
+---
+
+## 🔒 SÉCURITÉ
+
+### **Créer un utilisateur non-root (recommandé)**
+
+```bash
+# Créer un utilisateur
+adduser scraper
+usermod -aG sudo scraper
+
+# Changer le propriétaire des fichiers
+chown -R scraper:scraper /opt/scraper-centris
+
+# Modifier le service
+nano /etc/systemd/system/scraper-centris.service
+# Changez: User=root -> User=scraper
+systemctl daemon-reload
+systemctl restart scraper-centris
+```
+
+### **Configurer le firewall**
+
+```bash
+# Installer UFW
+apt install ufw
+
+# Autoriser SSH
+ufw allow ssh
+
+# Activer
+ufw enable
+
+# Vérifier
+ufw status
+```
+
+---
+
+## ✅ CHECKLIST POST-DÉPLOIEMENT
+
+- [ ] Le service démarre sans erreur
+- [ ] Les logs montrent l'activité du scraper
+- [ ] Le test API fonctionne
+- [ ] scraped_properties.json se remplit
+- [ ] Les fichiers property_*.json sont créés
+- [ ] Le monitoring DigitalOcean montre de l'activité
+- [ ] Vous recevez les données dans votre API
+
+---
+
+## 📞 SUPPORT
+
+**En cas de problème :**
+
+1. Vérifiez les logs : `tail -f /var/log/scraper-centris.log`
+2. Testez manuellement : `python3.12 scraper_production.py`
+3. Vérifiez la config : `cat config_api.py`
+
+**Commandes de diagnostic :**
+```bash
+# Info système
+uname -a
+python3.12 --version
+google-chrome --version
+chromedriver --version
+
+# Processus en cours
+ps aux | grep python
+
+# Connexions réseau
+netstat -tlnp | grep python
+```
+
+---
+
+## 🎉 FÉLICITATIONS !
+
+Votre scraper Centris est maintenant **en production** ! 🚀
+
+Il va tourner 24/7 et scraper automatiquement les nouvelles annonces !

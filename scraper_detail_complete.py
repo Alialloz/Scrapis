@@ -213,31 +213,11 @@ class CentrisDetailScraperComplete:
                     financial_data['depenses_exploitation'][key] = match.group(1).replace(' ', '').replace(',', '').strip()
                     depenses_found += 1
             
-            # TOUJOURS calculer le total à partir des dépenses individuelles
-            # C'est plus fiable que d'essayer de parser le HTML
-            if depenses_found > 0:
-                print(f"[INFO] Calcul du total des depenses depuis {depenses_found} elements...")
-                try:
-                    sum_depenses = 0
-                    depenses_details = []
-                    for key, value in financial_data['depenses_exploitation'].items():
-                        if key != 'total' and value:
-                            try:
-                                montant = float(value)
-                                sum_depenses += montant
-                                depenses_details.append(f"{key}={montant:.0f}")
-                            except:
-                                pass
-                    
-                    if sum_depenses > 0:
-                        financial_data['depenses_exploitation']['total'] = str(int(sum_depenses))
-                        print(f"[OK] Total depenses (calcule): {financial_data['depenses_exploitation']['total']} $")
-                        if len(depenses_details) <= 3:
-                            print(f"     Detail: {' + '.join(depenses_details)}")
-                        else:
-                            print(f"     Detail: {' + '.join(depenses_details[:3])} + {len(depenses_details)-3} autres")
-                except Exception as e:
-                    print(f"[WARNING] Erreur calcul total depenses: {e}")
+            # Total des dépenses
+            match = re.search(r'Total\s*([\d\s,]+)\s*\$.*?Revenus\s+nets', page_text, re.IGNORECASE | re.DOTALL)
+            if match:
+                financial_data['depenses_exploitation']['total'] = match.group(1).replace(' ', '').replace(',', '').strip()
+                depenses_found += 1
             
             if depenses_found > 0:
                 print(f"[OK] Depenses d'exploitation: {depenses_found} elements remplis sur {len(financial_data['depenses_exploitation'])}")
@@ -372,21 +352,11 @@ class CentrisDetailScraperComplete:
                 data['addenda'] = addenda
                 print(f"[OK] Addenda: {addenda[:100]}...")
             
-            # Source (prendre la dernière occurrence, pas "external sources")
-            # Il y a souvent 2 occurrences : "external sources" et "Source\n\nRE/MAX..."
-            # On cherche celle qui est suivie d'un nom d'agence immobilière
-            matches = list(re.finditer(r'(?:^|\n)Source\s*\n+\s*([A-ZÀ-Ÿ][^\n]+(?:INC|IMMOBILIER|COURTIER|AGENCE)[^\n]*)', 
-                                      page_text, re.IGNORECASE | re.MULTILINE))
-            if matches:
-                # Prendre la dernière occurrence
-                data['source'] = matches[-1].group(1).strip()
+            # Source
+            match = re.search(r'Source\s*([^\n]+)', page_text, re.IGNORECASE)
+            if match:
+                data['source'] = match.group(1).strip()
                 print(f"[OK] Source: {data['source']}")
-            else:
-                # Fallback: chercher n'importe quel "Source" suivi de texte (mais pas "external sources")
-                match = re.search(r'(?<!external )Source\s*\n+\s*([A-ZÀ-Ÿ][^\n]+)', page_text, re.IGNORECASE)
-                if match:
-                    data['source'] = match.group(1).strip()
-                    print(f"[OK] Source (fallback): {data['source']}")
             
         except Exception as e:
             print(f"Erreur extraction inclusions/exclusions: {e}")
@@ -424,9 +394,6 @@ class CentrisDetailScraperComplete:
             'salles_bain': None,
             'superficie_habitable': None,
             'superficie_terrain': None,
-            'evaluation_terrain': None,
-            'evaluation_batiment': None,
-            'evaluation_totale': None,
             'nb_photos': 0,
             
             # Courtier
@@ -488,26 +455,6 @@ class CentrisDetailScraperComplete:
             if sup_match:
                 property_data['superficie_terrain'] = sup_match.group(1).replace(' ', '').replace(',', '').strip()
                 print(f"[OK] Superficie terrain: {property_data['superficie_terrain']} pi²")
-            
-            # Évaluations municipales
-            eval_terrain_match = re.search(r'Éval\.\s+terrain\s*([\d\s]+)\s*\$', page_text, re.IGNORECASE)
-            if eval_terrain_match:
-                property_data['evaluation_terrain'] = eval_terrain_match.group(1).replace(' ', '').strip()
-                print(f"[OK] Evaluation terrain: {property_data['evaluation_terrain']} $")
-            
-            eval_batiment_match = re.search(r'Éval\.\s+bâtiment\s*([\d\s]+)\s*\$', page_text, re.IGNORECASE)
-            if eval_batiment_match:
-                property_data['evaluation_batiment'] = eval_batiment_match.group(1).replace(' ', '').strip()
-                print(f"[OK] Evaluation batiment: {property_data['evaluation_batiment']} $")
-            
-            # Calcul de l'évaluation totale si les deux sont disponibles
-            if property_data['evaluation_terrain'] and property_data['evaluation_batiment']:
-                try:
-                    total = int(property_data['evaluation_terrain']) + int(property_data['evaluation_batiment'])
-                    property_data['evaluation_totale'] = str(total)
-                    print(f"[OK] Evaluation totale (calculee): {property_data['evaluation_totale']} $")
-                except:
-                    pass
             
             photo_match = re.search(r'photo[s]?\s*\((\d+)\)', page_text, re.IGNORECASE)
             if photo_match:

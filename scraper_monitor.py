@@ -24,7 +24,7 @@ class CentrisMonitor:
     Moniteur pour détecter les nouvelles annonces et les scraper automatiquement
     """
     
-    def __init__(self, url, api_endpoint=None, storage_file='scraped_properties.json'):
+    def __init__(self, url, api_endpoint=None, storage_file='scraped_properties.json', min_date='2025-10-29'):
         """
         Initialise le moniteur
         
@@ -32,11 +32,14 @@ class CentrisMonitor:
             url: URL de la page Matrix Centris à surveiller
             api_endpoint: URL de l'API où envoyer les données (optionnel)
             storage_file: Fichier pour stocker les numéros Centris déjà scrapés
+            min_date: Date minimale pour les annonces (format: YYYY-MM-DD)
         """
         self.url = url
         self.api_endpoint = api_endpoint
         self.storage_file = storage_file
+        self.min_date = min_date
         self.scraped_ids = self.load_scraped_ids()
+        print(f"[CONFIG] Filtre de date active: annonces >= {self.min_date}")
         
     def load_scraped_ids(self):
         """
@@ -290,6 +293,23 @@ class CentrisMonitor:
                         property_data['_donnees_liste']['numero_centris'] = centris_id
                 else:
                     print(f"[OK] Numero Centris verifie: {scraped_centris}")
+                
+                # FILTRE DE DATE: Vérifier que l'annonce est assez récente
+                date_envoi = property_data.get('date_envoi')
+                if date_envoi:
+                    try:
+                        # Comparer les dates
+                        if date_envoi < self.min_date:
+                            print(f"[FILTRE] Annonce trop ancienne: {date_envoi} < {self.min_date}")
+                            print(f"[FILTRE] Annonce {centris_id} ignoree")
+                            scraper.close()
+                            return None
+                        else:
+                            print(f"[OK] Date valide: {date_envoi} >= {self.min_date}")
+                    except Exception as e:
+                        print(f"[WARNING] Impossible de verifier la date: {e}")
+                else:
+                    print(f"[WARNING] Pas de date_envoi trouvee pour {centris_id}")
             
             scraper.close()
             return property_data
