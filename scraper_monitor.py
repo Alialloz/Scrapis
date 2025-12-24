@@ -92,7 +92,7 @@ class CentrisMonitor:
         chrome_options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.binary_location = "/usr/bin/google-chrome"
-        
+
         try:
             driver = webdriver.Chrome(options=chrome_options)
         except:
@@ -303,6 +303,12 @@ class CentrisMonitor:
                         if date_envoi < self.min_date:
                             print(f"[FILTRE] Annonce trop ancienne: {date_envoi} < {self.min_date}")
                             print(f"[FILTRE] Annonce {centris_id} ignoree")
+                            
+                            # ⚠️ IMPORTANT: Marquer comme scrapée pour éviter la boucle infinie
+                            self.scraped_ids[centris_id] = datetime.now().isoformat()
+                            self.save_scraped_ids()
+                            print(f"[OK] Annonce {centris_id} marquee comme scrapee (filtree)")
+                            
                             scraper.close()
                             return None
                         else:
