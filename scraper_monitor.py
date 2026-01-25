@@ -17,6 +17,10 @@ from selenium.webdriver.chrome.service import Service
 import requests
 from bs4 import BeautifulSoup
 from scraper_with_list_info import CentrisScraperWithListInfo
+from logger_config import setup_logger, log_extraction_result, log_scraping_stats
+
+# Configuration du logger
+logger = setup_logger('monitor', level='INFO')
 
 
 class CentrisMonitor:
@@ -39,7 +43,7 @@ class CentrisMonitor:
         self.storage_file = storage_file
         self.min_date = min_date
         self.scraped_ids = self.load_scraped_ids()
-        print(f"[CONFIG] Filtre de date active: annonces >= {self.min_date}")
+        logger.info(f"Filtre de date actif: annonces >= {self.min_date}")
         
     def load_scraped_ids(self):
         """
@@ -52,13 +56,13 @@ class CentrisMonitor:
             try:
                 with open(self.storage_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    print(f"[INFO] {len(data)} annonces deja scrapees chargees depuis {self.storage_file}")
+                    logger.info(f"{len(data)} annonces déjà scrapées chargées depuis {self.storage_file}")
                     return data
             except Exception as e:
-                print(f"[WARNING] Erreur lecture {self.storage_file}: {e}")
+                logger.warning(f"Erreur lecture {self.storage_file}: {e}")
                 return {}
         else:
-            print(f"[INFO] Nouveau fichier {self.storage_file} sera cree")
+            logger.info(f"Nouveau fichier {self.storage_file} sera créé")
             return {}
     
     def save_scraped_ids(self):
@@ -68,9 +72,9 @@ class CentrisMonitor:
         try:
             with open(self.storage_file, 'w', encoding='utf-8') as f:
                 json.dump(self.scraped_ids, f, indent=2, ensure_ascii=False)
-            print(f"[OK] {len(self.scraped_ids)} IDs sauvegardes dans {self.storage_file}")
+            logger.debug(f"{len(self.scraped_ids)} IDs sauvegardés dans {self.storage_file}")
         except Exception as e:
-            print(f"[ERREUR] Impossible de sauvegarder {self.storage_file}: {e}")
+            logger.error(f"Impossible de sauvegarder {self.storage_file}: {e}")
     
     def get_all_listing_ids(self):
         """
@@ -79,9 +83,10 @@ class CentrisMonitor:
         Returns:
             list: Liste des numéros Centris trouvés
         """
-        print("\n=== RECUPERATION DE TOUS LES NUMEROS CENTRIS ===")
+        logger.info("=== RÉCUPÉRATION DE TOUS LES NUMÉROS CENTRIS ===")
         
         # Configurer Chrome (même config que scraper_with_list_info.py)
+        import platform
         chrome_options = Options()
         chrome_options.add_argument('--headless')
         chrome_options.add_argument('--disable-gpu')
@@ -91,7 +96,10 @@ class CentrisMonitor:
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])
         chrome_options.add_experimental_option('useAutomationExtension', False)
-        chrome_options.binary_location = "/usr/bin/google-chrome"
+        
+        # Spécifier le chemin Chrome uniquement sur Linux
+        if platform.system() == 'Linux':
+            chrome_options.binary_location = "/usr/bin/google-chrome"
 
         try:
             driver = webdriver.Chrome(options=chrome_options)
@@ -104,12 +112,12 @@ class CentrisMonitor:
         listing_ids = []
         
         try:
-            print(f"Chargement de la page: {self.url}")
+            logger.info(f"Chargement de la page: {self.url}")
             driver.get(self.url)
             time.sleep(5)
             
             # Faire défiler pour charger toutes les annonces
-            print("Defilement pour charger toutes les annonces...")
+            logger.info("Défilement pour charger toutes les annonces...")
             last_height = driver.execute_script("return document.body.scrollHeight")
             scroll_attempts = 0
             max_scrolls = 10
@@ -123,7 +131,7 @@ class CentrisMonitor:
                     break
                 last_height = new_height
                 scroll_attempts += 1
-                print(f"  Scroll {scroll_attempts}/{max_scrolls}...")
+                logger.debug(f"Scroll {scroll_attempts}/{max_scrolls}...")
             
             # Extraire tous les numéros Centris
             import re
@@ -135,12 +143,10 @@ class CentrisMonitor:
             
             listing_ids = list(set(matches))  # Enlever les doublons
             
-            print(f"[OK] {len(listing_ids)} annonces trouvees sur la page")
+            logger.info(f"✓ {len(listing_ids)} annonces trouvées sur la page")
             
         except Exception as e:
-            print(f"[ERREUR] Erreur lors de la recuperation des IDs: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Erreur lors de la récupération des IDs: {e}", exc_info=True)
         finally:
             driver.quit()
         
@@ -159,11 +165,11 @@ class CentrisMonitor:
         new_ids = [id for id in current_ids if id not in self.scraped_ids]
         
         if new_ids:
-            print(f"\n[NOUVEAU] {len(new_ids)} nouvelle(s) annonce(s) detectee(s):")
+            logger.info(f"{len(new_ids)} nouvelle(s) annonce(s) détectée(s):")
             for id in new_ids:
-                print(f"  - No Centris: {id}")
+                logger.info(f"  - No Centris: {id}")
         else:
-            print(f"\n[INFO] Aucune nouvelle annonce (toutes les {len(current_ids)} annonces ont deja ete scrapees)")
+            logger.info(f"Aucune nouvelle annonce (toutes les {len(current_ids)} annonces ont déjà été scrapées)")
         
         return new_ids
     
@@ -178,11 +184,12 @@ class CentrisMonitor:
             bool: True si l'envoi a réussi, False sinon
         """
         if not self.api_endpoint:
-            print("[INFO] Pas d'endpoint API configure, donnees non envoyees")
+            logger.info("Pas d'endpoint API configuré, données non envoyées")
             return True
         
         try:
-            print(f"[API] Envoi des donnees a {self.api_endpoint}...")
+            centris_id = property_data.get('numero_centris', 'N/A')
+            logger.info(f"Envoi des données à l'API - Centris #{centris_id}")
             
             headers = {
                 'Content-Type': 'application/json',
@@ -197,18 +204,18 @@ class CentrisMonitor:
             )
             
             if response.status_code in [200, 201]:
-                print(f"[OK] Donnees envoyees avec succes (Status: {response.status_code})")
+                logger.info(f"✓ Données envoyées avec succès (Status: {response.status_code}) - Centris #{centris_id}")
                 return True
             else:
-                print(f"[WARNING] API a retourne le status {response.status_code}")
-                print(f"  Reponse: {response.text[:200]}")
+                logger.warning(f"API a retourné le status {response.status_code} - Centris #{centris_id}")
+                logger.debug(f"Réponse: {response.text[:200]}")
                 return False
                 
         except requests.exceptions.Timeout:
-            print("[ERREUR] Timeout lors de l'envoi a l'API")
+            logger.error(f"Timeout lors de l'envoi à l'API - Centris #{centris_id}")
             return False
         except Exception as e:
-            print(f"[ERREUR] Erreur lors de l'envoi a l'API: {e}")
+            logger.error(f"Erreur lors de l'envoi à l'API - Centris #{centris_id}: {e}")
             return False
     
     def scrape_new_listing(self, centris_id):
@@ -221,9 +228,9 @@ class CentrisMonitor:
         Returns:
             dict: Données de la propriété ou None si erreur
         """
-        print(f"\n{'='*80}")
-        print(f"SCRAPING DE L'ANNONCE No Centris: {centris_id}")
-        print(f"{'='*80}")
+        logger.info("="*80)
+        logger.info(f"SCRAPING DE L'ANNONCE No Centris: {centris_id}")
+        logger.info("="*80)
         
         try:
             # Utiliser le scraper existant
@@ -231,12 +238,12 @@ class CentrisMonitor:
             scraper.init_driver()
             
             # Charger la page
-            print(f"Chargement de la page...")
+            logger.info("Chargement de la page...")
             scraper.driver.get(self.url)
             time.sleep(5)
             
             # Faire défiler pour charger toutes les annonces
-            print(f"Defilement de la page...")
+            logger.info("Défilement de la page...")
             scraper.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
             scraper.driver.execute_script("window.scrollTo(0, 0);")
@@ -244,7 +251,7 @@ class CentrisMonitor:
             
             # APPROCHE SIMPLE: Construire un mapping ID Centris -> Index
             # En parcourant la page source
-            print(f"Construction du mapping des annonces...")
+            logger.info("Construction du mapping des annonces...")
             html = scraper.driver.page_source
             soup = BeautifulSoup(html, 'html.parser')
             
@@ -265,18 +272,18 @@ class CentrisMonitor:
                         if found_id not in centris_to_index:
                             centris_to_index[found_id] = index
                             index += 1
-                            print(f"  [{index}] No Centris: {found_id}")
+                            logger.debug(f"  [{index}] No Centris: {found_id}")
             
-            print(f"\n[INFO] {len(centris_to_index)} annonces mappees")
+            logger.info(f"{len(centris_to_index)} annonces mappées")
             
             # Trouver l'index de notre annonce cible
             if centris_id not in centris_to_index:
-                print(f"[ERREUR] Annonce {centris_id} non trouvee dans le mapping")
+                logger.error(f"Annonce {centris_id} non trouvée dans le mapping")
                 scraper.close()
                 return None
             
             target_index = centris_to_index[centris_id]
-            print(f"[OK] Annonce {centris_id} trouvee a l'index {target_index}")
+            logger.info(f"✓ Annonce {centris_id} trouvée à l'index {target_index}")
             
             # Utiliser l'approche simple par index qui fonctionne
             property_data = scraper.scrape_property_with_list_info(index=target_index)
@@ -285,15 +292,15 @@ class CentrisMonitor:
             if property_data:
                 scraped_centris = property_data.get('numero_centris')
                 if scraped_centris != centris_id:
-                    print(f"[WARNING] Numero Centris ne correspond pas!")
-                    print(f"  Attendu: {centris_id}")
-                    print(f"  Obtenu: {scraped_centris}")
+                    logger.warning(f"Numéro Centris ne correspond pas!")
+                    logger.warning(f"  Attendu: {centris_id}")
+                    logger.warning(f"  Obtenu: {scraped_centris}")
                     # Forcer le bon numéro Centris
                     property_data['numero_centris'] = centris_id
                     if property_data.get('_donnees_liste'):
                         property_data['_donnees_liste']['numero_centris'] = centris_id
                 else:
-                    print(f"[OK] Numero Centris verifie: {scraped_centris}")
+                    logger.debug(f"Numéro Centris vérifié: {scraped_centris}")
                 
                 # FILTRE DE DATE: Vérifier que l'annonce est assez récente
                 date_envoi = property_data.get('date_envoi')
@@ -301,30 +308,28 @@ class CentrisMonitor:
                     try:
                         # Comparer les dates
                         if date_envoi < self.min_date:
-                            print(f"[FILTRE] Annonce trop ancienne: {date_envoi} < {self.min_date}")
-                            print(f"[FILTRE] Annonce {centris_id} ignoree")
+                            logger.info(f"Annonce trop ancienne: {date_envoi} < {self.min_date}")
+                            logger.info(f"Annonce {centris_id} ignorée")
                             
                             # ⚠️ IMPORTANT: Marquer comme scrapée pour éviter la boucle infinie
                             self.scraped_ids[centris_id] = datetime.now().isoformat()
                             self.save_scraped_ids()
-                            print(f"[OK] Annonce {centris_id} marquee comme scrapee (filtree)")
+                            logger.info(f"✓ Annonce {centris_id} marquée comme scrapée (filtrée)")
                             
                             scraper.close()
                             return None
                         else:
-                            print(f"[OK] Date valide: {date_envoi} >= {self.min_date}")
+                            logger.debug(f"Date valide: {date_envoi} >= {self.min_date}")
                     except Exception as e:
-                        print(f"[WARNING] Impossible de verifier la date: {e}")
+                        logger.warning(f"Impossible de vérifier la date: {e}")
                 else:
-                    print(f"[WARNING] Pas de date_envoi trouvee pour {centris_id}")
+                    logger.warning(f"Pas de date_envoi trouvée pour {centris_id}")
             
             scraper.close()
             return property_data
             
         except Exception as e:
-            print(f"[ERREUR] Erreur scraping annonce {centris_id}: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Erreur scraping annonce {centris_id}: {e}", exc_info=True)
             try:
                 scraper.close()
             except:
@@ -338,9 +343,10 @@ class CentrisMonitor:
         Returns:
             dict: Statistiques du cycle
         """
-        print(f"\n{'='*80}")
-        print(f"CYCLE DE MONITORING - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"{'='*80}")
+        cycle_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        logger.info("="*80)
+        logger.info(f"CYCLE DE MONITORING - {cycle_time}")
+        logger.info("="*80)
         
         stats = {
             'timestamp': datetime.now().isoformat(),
@@ -372,7 +378,7 @@ class CentrisMonitor:
                     filename = f"property_{centris_id}.json"
                     with open(filename, 'w', encoding='utf-8') as f:
                         json.dump(property_data, f, indent=2, ensure_ascii=False)
-                    print(f"[OK] Donnees sauvegardees dans {filename}")
+                    logger.info(f"✓ Données sauvegardées dans {filename}")
                     
                     # Envoyer à l'API
                     if self.send_to_api(property_data):
@@ -386,22 +392,22 @@ class CentrisMonitor:
                     stats['errors'] += 1
                     
             except Exception as e:
-                print(f"[ERREUR] Erreur lors du traitement de {centris_id}: {e}")
+                logger.error(f"Erreur lors du traitement de {centris_id}: {e}", exc_info=True)
                 stats['errors'] += 1
             
             # Pause entre chaque scraping pour ne pas surcharger le serveur
             time.sleep(5)
         
         # Résumé
-        print(f"\n{'='*80}")
-        print(f"RESUME DU CYCLE")
-        print(f"{'='*80}")
-        print(f"Total annonces sur la page: {stats['total_listings']}")
-        print(f"Nouvelles annonces: {stats['new_listings']}")
-        print(f"Scrapees avec succes: {stats['scraped_successfully']}")
-        print(f"Envoyees a l'API: {stats['sent_to_api']}")
-        print(f"Erreurs: {stats['errors']}")
-        print(f"Total annonces en memoire: {len(self.scraped_ids)}")
+        summary_stats = {
+            'Total annonces sur la page': stats['total_listings'],
+            'Nouvelles annonces': stats['new_listings'],
+            'Scrapées avec succès': stats['scraped_successfully'],
+            'Envoyées à l\'API': stats['sent_to_api'],
+            'Erreurs': stats['errors'],
+            'Total annonces en mémoire': len(self.scraped_ids)
+        }
+        log_scraping_stats(logger, summary_stats)
         
         return stats
     
@@ -412,29 +418,29 @@ class CentrisMonitor:
         Args:
             interval_minutes: Intervalle en minutes entre chaque cycle
         """
-        print(f"\n{'='*80}")
-        print(f"DEMARRAGE DU MONITORING CONTINU")
-        print(f"Intervalle: {interval_minutes} minutes")
-        print(f"{'='*80}")
+        logger.info("="*80)
+        logger.info("DÉMARRAGE DU MONITORING CONTINU")
+        logger.info(f"Intervalle: {interval_minutes} minutes")
+        logger.info("="*80)
         
         cycle_number = 0
         
         try:
             while True:
                 cycle_number += 1
-                print(f"\n>>> CYCLE #{cycle_number} <<<")
+                logger.info(f">>> CYCLE #{cycle_number} <<<")
                 
                 self.run_monitoring_cycle()
                 
-                print(f"\n[INFO] Prochain cycle dans {interval_minutes} minutes...")
-                print(f"[INFO] Appuyez sur Ctrl+C pour arreter le monitoring")
+                logger.info(f"Prochain cycle dans {interval_minutes} minutes...")
+                logger.info(f"Appuyez sur Ctrl+C pour arrêter le monitoring")
                 
                 time.sleep(interval_minutes * 60)
                 
         except KeyboardInterrupt:
-            print(f"\n\n[INFO] Arret du monitoring demande par l'utilisateur")
-            print(f"[INFO] Total de {cycle_number} cycles executes")
-            print(f"[INFO] {len(self.scraped_ids)} annonces en memoire")
+            logger.info("Arrêt du monitoring demandé par l'utilisateur")
+            logger.info(f"Total de {cycle_number} cycles exécutés")
+            logger.info(f"{len(self.scraped_ids)} annonces en mémoire")
 
 
 def main():
@@ -454,11 +460,11 @@ def main():
     )
     
     # Option 1: Exécuter un seul cycle
-    print("=== MODE: CYCLE UNIQUE ===")
+    logger.info("=== MODE: CYCLE UNIQUE ===")
     monitor.run_monitoring_cycle()
     
     # Option 2: Monitoring continu (décommenter pour activer)
-    # print("=== MODE: MONITORING CONTINU ===")
+    # logger.info("=== MODE: MONITORING CONTINU ===")
     # monitor.run_continuous_monitoring(interval_minutes=60)
 
 
