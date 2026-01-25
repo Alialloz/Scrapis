@@ -21,13 +21,18 @@ class CentrisDetailScraperComplete:
     def init_driver(self):
         """Initialise le driver Chrome"""
         try:
+            import platform
+            
             chrome_options = webdriver.ChromeOptions()
             chrome_options.add_argument('--headless')
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
-            chrome_options.binary_location = "/usr/bin/google-chrome"
+            
+            # Spécifier le chemin Chrome uniquement sur Linux
+            if platform.system() == 'Linux':
+                chrome_options.binary_location = "/usr/bin/google-chrome"
             
             self.driver = webdriver.Chrome(options=chrome_options)
             return True
@@ -325,17 +330,27 @@ class CentrisDetailScraperComplete:
         }
         
         try:
-            # Inclusions
-            match = re.search(r'Inclusions?\s*([^\\n]+(?:\\n(?!Exclusions)[^\\n]+)*)', page_text, re.IGNORECASE | re.DOTALL)
-            if match:
-                data['inclusions'] = match.group(1).strip()
-                print(f"[OK] Inclusions: {data['inclusions'][:80]}...")
+            # Inclusions - Pattern amélioré
+            incl_match = re.search(r'Inclusions?\s*[:\-]?\s*([A-ZÀ-Ÿ][^\n]{5,200})', page_text, re.IGNORECASE)
+            if incl_match:
+                inclusions = incl_match.group(1).strip()
+                inclusions = re.sub(r'\s+', ' ', inclusions)
+                # Arrêter avant "Exclusions" si présent
+                inclusions = re.split(r'\s*Exclusions?', inclusions)[0].strip()
+                if len(inclusions) > 3:
+                    data['inclusions'] = inclusions
+                    print(f"[OK] Inclusions: {data['inclusions'][:80]}...")
             
-            # Exclusions
-            match = re.search(r'Exclusions?\s*([^\\n]+(?:\\n(?!Remarques)[^\\n]+)*)', page_text, re.IGNORECASE | re.DOTALL)
-            if match:
-                data['exclusions'] = match.group(1).strip()
-                print(f"[OK] Exclusions: {data['exclusions'][:80]}...")
+            # Exclusions - Pattern amélioré
+            excl_match = re.search(r'Exclusions?\s*[:\-]?\s*([A-ZÀ-Ÿ][^\n]{5,200})', page_text, re.IGNORECASE)
+            if excl_match:
+                exclusions = excl_match.group(1).strip()
+                exclusions = re.sub(r'\s+', ' ', exclusions)
+                # Arrêter avant "Remarques" si présent
+                exclusions = re.split(r'\s*Remarques?', exclusions)[0].strip()
+                if len(exclusions) > 3:
+                    data['exclusions'] = exclusions
+                    print(f"[OK] Exclusions: {data['exclusions'][:80]}...")
             
             # Remarques
             match = re.search(r'Remarques?\s*((?:.|\n)+?)(?:Addenda|Source|$)', page_text, re.IGNORECASE)
@@ -354,11 +369,46 @@ class CentrisDetailScraperComplete:
                 data['addenda'] = addenda
                 print(f"[OK] Addenda: {addenda[:100]}...")
             
-            # Source
-            match = re.search(r'Source\s*([^\n]+)', page_text, re.IGNORECASE)
+            # Source - Utiliser le Pattern 3 qui fonctionne !
+            source = None
+            
+            # Pattern principal: Cherche "Source" suivi d'un nom d'agence jusqu'à "Agence immobilière"
+            # Pattern robuste qui s'arrête à "Agence immobilière"
+            match = re.search(r'Source[^A-ZÀ-Ÿ]*([A-ZÀ-Ÿ][A-Za-zÀ-ÿ0-9\s&\-\',/\.]+?Agence immobilière)', page_text, re.IGNORECASE)
             if match:
-                data['source'] = match.group(1).strip()
+                source = match.group(1).strip()
+                source = re.sub(r'\s+', ' ', source)
+            else:
+                # Si pas trouvé avec "Agence immobilière", essayer sans (moins robuste)
+                match = re.search(r'Source[^A-ZÀ-Ÿ]*([A-ZÀ-Ÿ][A-Za-zÀ-ÿ0-9\s&\-\',/\.]+)', page_text, re.IGNORECASE)
+                if match:
+                    source = match.group(1).strip()
+                    source = re.sub(r'\s+', ' ', source)
+                    # Arrêter avant des mots indésirables (texte de la page qui n'est pas la source)
+                    stop_words = r'(?:La présente|Inscription|Dernière|Le présent|mguimo|Erreur|Téléchargement|Données|Contact|Avis|Note|Voir)'
+                    source = re.split(stop_words, source, flags=re.IGNORECASE)[0].strip()
+                    # Nettoyer les caractères de ponctuation en fin de texte
+                    source = re.sub(r'[\.,;:\s]+$', '', source)
+                
+            # Si pas trouvé ou trop court, chercher directement "RAY HARVEY"
+            if not source or len(source) < 10:
+                match = re.search(r'(RAY HARVEY\s*&\s*ASSOCIÉS[^a-z]{0,30}Agence immobilière)', page_text, re.IGNORECASE)
+                if match:
+                    source = match.group(1).strip()
+                    source = re.sub(r'\s+', ' ', source)
+            
+            # Nettoyer la source finale
+            if source:
+                source = re.sub(r'[\n\r\t]+', ' ', source)
+                source = re.sub(r'\s+', ' ', source)
+                source = source.strip()
+                # Limiter à 150 caractères max
+                if len(source) > 150:
+                    source = source[:150].strip()
+                data['source'] = source
                 print(f"[OK] Source: {data['source']}")
+            else:
+                print(f"[WARNING] Source non trouvee")
             
         except Exception as e:
             print(f"Erreur extraction inclusions/exclusions: {e}")

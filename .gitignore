@@ -26,8 +26,14 @@ wheels/
 # Fichiers de données
 *.csv
 *.json
+!tests/README.md
+!analyze/README.md
 centris_properties_*.csv
 centris_properties_*.json
+
+# Résultats de tests (générés)
+tests/test_*.json
+tests/property_*.json
 
 # IDE
 .vscode/

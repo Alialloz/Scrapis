@@ -16,6 +16,182 @@ from scraper_detail_complete import CentrisDetailScraperComplete
 class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
     """Scraper qui extrait d'abord les infos de la liste, puis les détails"""
     
+    def click_on_property_by_index(self, index=0):
+        """
+        Version synchronisée avec extract_info_from_list()
+        Utilise la MÊME logique pour trouver les conteneurs
+        """
+        try:
+            print(f"\n=== Clic sur la propriete #{index+1} ===")
+            time.sleep(2)
+            
+            # MÊME LOGIQUE que extract_info_from_list() pour trouver les conteneurs
+            html = self.driver.page_source
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Trouver tous les blocs qui contiennent "No Centris"
+            all_text_blocks = soup.find_all(string=re.compile(r'No Centris', re.IGNORECASE))
+            
+            property_containers = []
+            for text_block in all_text_blocks:
+                parent = text_block.parent
+                for _ in range(5):
+                    if parent:
+                        parent_text = parent.get_text()
+                        if '$' in parent_text and 'Québec' in parent_text and 'No Centris' in parent_text:
+                            property_containers.append(parent)
+                            break
+                        try:
+                            parent = parent.parent
+                        except:
+                            break
+            
+            print(f"Conteneurs de proprietes trouves: {len(property_containers)}")
+            
+            if not property_containers or index >= len(property_containers):
+                print("Index invalide ou aucun conteneur trouve")
+                return False
+            
+            # Extraire l'adresse du conteneur à l'index voulu
+            target_container = property_containers[index]
+            container_text = target_container.get_text()
+            
+            # Pattern d'extraction d'adresse (MÊME que extract_info_from_list)
+            adresse_match = re.search(
+                r'(\d+[A-Z]*(?:-\d+[A-Z]*)*\s+(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)\s+[A-Za-zÀ-ÿ\'\-\.\s]+?)(?=\n|Québec|$)',
+                container_text,
+                re.IGNORECASE | re.MULTILINE
+            )
+            
+            if not adresse_match:
+                print("[ERREUR] Impossible d'extraire l'adresse du conteneur")
+                return False
+            
+            adresse_cible = adresse_match.group(1).strip()
+            adresse_cible = re.sub(r'\s+', ' ', adresse_cible)
+            print(f"Adresse cible: {adresse_cible}")
+            
+            # Chercher TOUS les liens de propriété (comme la méthode originale)
+            self.driver.execute_script("window.scrollTo(0, 1000);")
+            time.sleep(1)
+            
+            property_links = self.driver.find_elements(
+                By.XPATH, 
+                "//a[contains(text(), 'Boul.') or contains(text(), 'Rue') or contains(text(), 'Av.') or contains(text(), 'Ch.')]"
+            )
+            
+            if not property_links:
+                all_links = self.driver.find_elements(By.TAG_NAME, "a")
+                property_links = [link for link in all_links 
+                                if link.text and len(link.text) > 15 
+                                and any(char.isdigit() for char in link.text)
+                                and ('Boul' in link.text or 'Rue' in link.text or 'Av.' in link.text)]
+            
+            print(f"Liens de proprietes trouves: {len(property_links)}")
+            
+            # Chercher le lien qui correspond à l'adresse cible
+            target_link = None
+            for link in property_links:
+                link_text = link.text.strip()
+                # Nettoyer et normaliser
+                link_text_clean = re.sub(r'\s+', ' ', link_text)
+                adresse_clean = re.sub(r'\s+', ' ', adresse_cible)
+                
+                # Vérifier si c'est le bon lien
+                if adresse_clean in link_text_clean or link_text_clean in adresse_clean:
+                    target_link = link
+                    print(f"Lien correspondant trouve: {link_text[:60]}")
+                    break
+            
+            if not target_link:
+                print(f"[ERREUR] Aucun lien ne correspond a l'adresse: {adresse_cible}")
+                # Debug : afficher tous les liens trouvés
+                print("Liens disponibles:")
+                for i, link in enumerate(property_links[:10]):
+                    print(f"  {i}: {link.text[:60]}")
+                return False
+            
+            # Cliquer sur le lien trouvé
+            try:
+                url_before = self.driver.current_url
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_link)
+                time.sleep(0.5)
+                
+                # Essayer clic normal d'abord
+                target_link.click()
+                print("[INFO] Clic effectue, attente de l'ouverture du panneau...")
+                
+                # Attendre que le panneau se charge (vérifier présence d'éléments de détail)
+                panel_opened = False
+                for i in range(15):  # Augmenté à 15 tentatives (7.5 secondes)
+                    time.sleep(0.5)
+                    
+                    # Méthode 1: Vérifier le changement d'URL
+                    url_changed = '#' in self.driver.current_url and self.driver.current_url != url_before
+                    
+                    # Méthode 2: Vérifier la présence d'éléments du panneau de détail
+                    # Chercher des éléments typiques du panneau (prix, description détaillée, etc.)
+                    try:
+                        html = self.driver.page_source
+                        # Le panneau contient généralement des sections détaillées
+                        panel_indicators = [
+                            'Caractéristiques du bâtiment',
+                            'Dimensions des pièces',
+                            'Revenus et dépenses',
+                            'Addenda',
+                            'Inclusions',
+                        ]
+                        panel_present = any(indicator in html for indicator in panel_indicators)
+                    except:
+                        panel_present = False
+                    
+                    if url_changed or panel_present:
+                        print(f"[OK] Panneau detecte! (tentative {i+1})")
+                        if url_changed:
+                            print(f"     URL: {self.driver.current_url}")
+                        if panel_present:
+                            print(f"     Elements de detail detectes dans le DOM")
+                        time.sleep(3)  # Attente supplémentaire pour chargement complet
+                        panel_opened = True
+                        break
+                
+                if panel_opened:
+                    return True
+                
+                # Si ça n'a pas marché, essayer avec JavaScript
+                print("[INFO] Tentative avec clic JavaScript...")
+                self.driver.execute_script("arguments[0].click();", target_link)
+                
+                for i in range(15):
+                    time.sleep(0.5)
+                    url_changed = '#' in self.driver.current_url and self.driver.current_url != url_before
+                    try:
+                        html = self.driver.page_source
+                        panel_indicators = ['Caractéristiques du bâtiment', 'Dimensions des pièces', 'Revenus et dépenses', 'Addenda', 'Inclusions']
+                        panel_present = any(indicator in html for indicator in panel_indicators)
+                    except:
+                        panel_present = False
+                    
+                    if url_changed or panel_present:
+                        print(f"[OK] Panneau detecte (JS)! (tentative {i+1})")
+                        time.sleep(3)
+                        return True
+                
+                print("[ERREUR] Le panneau ne s'est pas ouvert apres toutes les tentatives")
+                return False
+                
+            except Exception as e:
+                print(f"[ERREUR] Echec du clic: {e}")
+                import traceback
+                traceback.print_exc()
+                return False
+                
+        except Exception as e:
+            print(f"Erreur lors du clic: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
     def extract_info_from_list(self, index=0):
         """
         Extrait les informations visibles dans la liste AVANT de cliquer
@@ -534,6 +710,13 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
         
         # Ajouter les données de la liste comme référence
         combined_data['_donnees_liste'] = list_info
+        
+        # Fermer le panneau de détail pour revenir à la liste
+        print("\n=== Fermeture du panneau ===")
+        if self.close_panel():
+            print("[OK] Panneau ferme, retour a la liste")
+        else:
+            print("[WARNING] Echec fermeture panneau")
         
         return combined_data
 
