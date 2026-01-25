@@ -52,5 +52,7 @@ chromedriver
 
 # Logs
 *.log
+logs/
+!logs/.gitkeep
 
 
