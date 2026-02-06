@@ -49,12 +49,13 @@ except ImportError:
 class CentrisProductionMonitor(CentrisMonitor):
     """Version production du moniteur avec configuration personnalisée"""
     
-    def __init__(self, min_date='2025-12-20'):
+    def __init__(self, min_date='2026-01-26', skip_photos=False):
         super().__init__(
             url=MATRIX_URL,
             api_endpoint=API_ENDPOINT,
             storage_file=STORAGE_FILE,
-            min_date=min_date
+            min_date=min_date,
+            skip_photos=skip_photos
         )
         self.api_headers = API_HEADERS
         self.api_timeout = API_TIMEOUT
@@ -69,6 +70,25 @@ class CentrisProductionMonitor(CentrisMonitor):
         self.auto_backup_scraped_ids = AUTO_BACKUP_SCRAPED_IDS
         self.last_cleanup_date = None
         
+    def _normalize_for_api(self, data):
+        """
+        L'API exige des chaînes pour quartier, annee_construction, statut.
+        Convertit null en "" pour éviter les erreurs 400.
+        """
+        for key in ('quartier', 'annee_construction', 'statut'):
+            if key in data and data[key] is None:
+                data[key] = ""
+            elif key in data and not isinstance(data[key], str):
+                data[key] = str(data[key]) if data[key] is not None else ""
+        if '_donnees_liste' in data and isinstance(data['_donnees_liste'], dict):
+            for key in ('quartier', 'annee_construction', 'statut'):
+                if key in data['_donnees_liste'] and data['_donnees_liste'][key] is None:
+                    data['_donnees_liste'][key] = ""
+                elif key in data['_donnees_liste'] and not isinstance(data['_donnees_liste'][key], str):
+                    val = data['_donnees_liste'][key]
+                    data['_donnees_liste'][key] = str(val) if val is not None else ""
+        return data
+    
     def send_to_api(self, property_data):
         """
         Envoie les données d'une propriété à l'API (version personnalisée)
@@ -81,13 +101,19 @@ class CentrisProductionMonitor(CentrisMonitor):
         try:
             import requests
             
+            # Copie pour ne pas modifier l'original, puis normalisation pour l'API
+            payload = dict(property_data)
+            if '_donnees_liste' in payload and isinstance(payload.get('_donnees_liste'), dict):
+                payload['_donnees_liste'] = dict(payload['_donnees_liste'])
+            payload = self._normalize_for_api(payload)
+            
             centris_id = property_data.get('numero_centris', 'N/A')
             logger.info(f"Envoi des données à l'API - Centris #{centris_id}")
             logger.debug(f"Endpoint: {self.api_endpoint}")
             
             response = requests.post(
                 self.api_endpoint,
-                json=property_data,
+                json=payload,
                 headers=self.api_headers,
                 timeout=self.api_timeout
             )
@@ -159,6 +185,18 @@ class CentrisProductionMonitor(CentrisMonitor):
                     if property_data:
                         stats['scraped_successfully'] += 1
                         
+                        # Vérifier si on a les détails (panneau ouvert) ou seulement la liste
+                        has_detail = bool(
+                            property_data.get('donnees_financieres') or
+                            property_data.get('source') or
+                            (not self.skip_photos and property_data.get('photo_urls') and len(property_data.get('photo_urls', [])) > 0)
+                        )
+                        if not has_detail:
+                            logger.warning(
+                                f"Données détail manquantes pour Centris #{centris_id} "
+                                "(panneau non ouvert?) - non envoyé à l'API"
+                            )
+                        
                         # Sauvegarder localement si configuré
                         if self.save_json_locally:
                             filename = f"property_{centris_id}.json"
@@ -166,8 +204,8 @@ class CentrisProductionMonitor(CentrisMonitor):
                                 json.dump(property_data, f, indent=2, ensure_ascii=False)
                             logger.info(f"✓ Données sauvegardées dans {filename}")
                         
-                        # Envoyer à l'API
-                        if self.send_to_api(property_data):
+                        # Envoyer à l'API seulement si on a les détails
+                        if has_detail and self.send_to_api(property_data):
                             stats['sent_to_api'] += 1
                         
                         # Marquer comme scrapé
@@ -435,10 +473,10 @@ def main():
     logger.info(f"✓ URL Matrix: {MATRIX_URL}")
     logger.info(f"✓ Intervalle: {MONITORING_INTERVAL} minutes")
     logger.info(f"✓ Fichier de stockage: {STORAGE_FILE}")
-    logger.info(f"✓ Date minimale: 2025-10-29 (annonces antérieures ignorées)")
+    logger.info(f"✓ Date minimale: 2026-01-26 (annonces antérieures ignorées)")
     
     # Créer le moniteur
-    monitor = CentrisProductionMonitor(min_date='2025-12-20')
+    monitor = CentrisProductionMonitor(min_date='2026-01-26', skip_photos=False)
     
     # Lancer le monitoring continu
     logger.info("Lancement du monitoring continu...")

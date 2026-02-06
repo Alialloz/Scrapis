@@ -28,7 +28,7 @@ class CentrisMonitor:
     Moniteur pour détecter les nouvelles annonces et les scraper automatiquement
     """
     
-    def __init__(self, url, api_endpoint=None, storage_file='scraped_properties.json', min_date='2025-12-20'):
+    def __init__(self, url, api_endpoint=None, storage_file='scraped_properties.json', min_date='2025-12-20', skip_photos=False):
         """
         Initialise le moniteur
         
@@ -37,13 +37,17 @@ class CentrisMonitor:
             api_endpoint: URL de l'API où envoyer les données (optionnel)
             storage_file: Fichier pour stocker les numéros Centris déjà scrapés
             min_date: Date minimale pour les annonces (format: YYYY-MM-DD)
+            skip_photos: Si True, ne pas extraire les URLs des photos (plus rapide)
         """
         self.url = url
         self.api_endpoint = api_endpoint
         self.storage_file = storage_file
         self.min_date = min_date
+        self.skip_photos = skip_photos
         self.scraped_ids = self.load_scraped_ids()
         logger.info(f"Filtre de date actif: annonces >= {self.min_date}")
+        if self.skip_photos:
+            logger.info("Mode skip_photos activé: extraction des photos désactivée")
         
     def load_scraped_ids(self):
         """
@@ -220,7 +224,8 @@ class CentrisMonitor:
     
     def scrape_new_listing(self, centris_id):
         """
-        Scrape une nouvelle annonce par son numéro Centris
+        Scrape une nouvelle annonce par son numéro Centris.
+        Utilise la recherche directe par Centris ID (pas de mapping par index).
         
         Args:
             centris_id: Numéro Centris de l'annonce
@@ -249,56 +254,19 @@ class CentrisMonitor:
             scraper.driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(1)
             
-            # APPROCHE SIMPLE: Construire un mapping ID Centris -> Index
-            # En parcourant la page source
-            logger.info("Construction du mapping des annonces...")
-            html = scraper.driver.page_source
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            # Trouver tous les conteneurs d'annonces
-            all_text_blocks = soup.find_all(string=re.compile(r'No\s*Centris', re.IGNORECASE))
-            
-            centris_to_index = {}
-            index = 0
-            
-            for text_block in all_text_blocks:
-                # Extraire le numéro Centris de ce bloc
-                parent = text_block.parent
-                if parent:
-                    parent_text = parent.get_text()
-                    match = re.search(r'No\s*Centris\s*[:\-]?\s*(\d+)', parent_text, re.IGNORECASE)
-                    if match:
-                        found_id = match.group(1)
-                        if found_id not in centris_to_index:
-                            centris_to_index[found_id] = index
-                            index += 1
-                            logger.debug(f"  [{index}] No Centris: {found_id}")
-            
-            logger.info(f"{len(centris_to_index)} annonces mappées")
-            
-            # Trouver l'index de notre annonce cible
-            if centris_id not in centris_to_index:
-                logger.error(f"Annonce {centris_id} non trouvée dans le mapping")
-                scraper.close()
-                return None
-            
-            target_index = centris_to_index[centris_id]
-            logger.info(f"✓ Annonce {centris_id} trouvée à l'index {target_index}")
-            
-            # Utiliser l'approche simple par index qui fonctionne
-            property_data = scraper.scrape_property_with_list_info(index=target_index)
+            # Scraper directement par numéro Centris (plus fiable que le mapping par index)
+            logger.info(f"Scraping direct par Centris ID: {centris_id}")
+            property_data = scraper.scrape_property_by_centris_id(centris_id, skip_photos=self.skip_photos)
             
             # Vérifier que le numéro Centris correspond bien
             if property_data:
                 scraped_centris = property_data.get('numero_centris')
-                if scraped_centris != centris_id:
-                    logger.warning(f"Numéro Centris ne correspond pas!")
-                    logger.warning(f"  Attendu: {centris_id}")
-                    logger.warning(f"  Obtenu: {scraped_centris}")
-                    # Forcer le bon numéro Centris
-                    property_data['numero_centris'] = centris_id
-                    if property_data.get('_donnees_liste'):
-                        property_data['_donnees_liste']['numero_centris'] = centris_id
+                if scraped_centris and scraped_centris != centris_id:
+                    # ⚠️ Ne PAS écraser le Centris ID -- rejeter les données incorrectes
+                    logger.error(f"Numéro Centris ne correspond pas! Attendu: {centris_id}, Obtenu: {scraped_centris}")
+                    logger.error(f"Données rejetées pour éviter de mélanger les propriétés")
+                    scraper.close()
+                    return None
                 else:
                     logger.debug(f"Numéro Centris vérifié: {scraped_centris}")
                 

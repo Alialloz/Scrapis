@@ -16,6 +16,412 @@ from scraper_detail_complete import CentrisDetailScraperComplete
 class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
     """Scraper qui extrait d'abord les infos de la liste, puis les détails"""
     
+    def _find_property_containers(self):
+        """
+        Trouve tous les conteneurs de propriétés sur la page.
+        Supporte Québec, Lévis et autres villes.
+        
+        Returns:
+            list: Liste de tuples (container, centris_id)
+        """
+        html = self.driver.page_source
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        all_text_blocks = soup.find_all(string=re.compile(r'No\s*Centris', re.IGNORECASE))
+        
+        results = []
+        seen_ids = set()
+        
+        for text_block in all_text_blocks:
+            parent = text_block.parent
+            for _ in range(8):
+                if parent:
+                    parent_text = parent.get_text()
+                    # Vérifier : contient un prix ($) ET un numéro Centris
+                    # Ne PAS filtrer par ville pour supporter Lévis, etc.
+                    if '$' in parent_text and 'No Centris' in parent_text:
+                        centris_match = re.search(r'No\s*Centris\s*[:\-]?\s*(\d+)', parent_text, re.IGNORECASE)
+                        if centris_match:
+                            cid = centris_match.group(1)
+                            if cid not in seen_ids:
+                                seen_ids.add(cid)
+                                results.append((parent, cid))
+                        break
+                    try:
+                        parent = parent.parent
+                    except:
+                        break
+        
+        return results
+    
+    def find_container_by_centris_id(self, centris_id):
+        """
+        Trouve le conteneur d'une propriété par son numéro Centris.
+        
+        Args:
+            centris_id: Numéro Centris à trouver
+            
+        Returns:
+            tuple: (container, index) ou (None, -1) si non trouvé
+        """
+        containers = self._find_property_containers()
+        for idx, (container, cid) in enumerate(containers):
+            if cid == centris_id:
+                return container, idx
+        return None, -1
+    
+    def click_on_property_by_centris_id(self, centris_id):
+        """
+        Trouve et clique sur une propriété par son numéro Centris.
+        
+        Args:
+            centris_id: Numéro Centris de la propriété
+            
+        Returns:
+            bool: True si le panneau s'est ouvert, False sinon
+        """
+        try:
+            print(f"\n=== Clic sur la propriete Centris #{centris_id} ===")
+            time.sleep(2)
+            
+            container, idx = self.find_container_by_centris_id(centris_id)
+            
+            if container is None:
+                print(f"[ERREUR] Annonce Centris #{centris_id} non trouvée sur la page")
+                return False
+            
+            container_text = container.get_text()
+            print(f"[OK] Conteneur trouvé (index {idx}) pour Centris #{centris_id}")
+            
+            # Extraire l'adresse du conteneur
+            adresse_patterns = [
+                # Pattern pour "2020 27e Rue" (numero civique + ordinal + type de rue)
+                r'(\d+(?:-\d+[A-Z]*)?\s+\d+(?:e|er|re|ère)\s+(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)[A-Za-zÀ-ÿ\'\-\.\s]*)(?=\n|Québec|Lévis|$)',
+                r'(\d+(?:-\d+[A-Z]*)*\s+(?:(?:1re|2e|1er)\s+)?(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)\s+[A-Za-zÀ-ÿ\'\-\.\s]*?)(?=\n|Québec|Lévis|$)',
+                r'(\d+[A-Z]*(?:-\d+[A-Z]*)*\s+(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)\s+[A-Za-zÀ-ÿ\'\-\.\s]+?)(?=\n|Québec|Lévis|$)',
+            ]
+            adresse_match = None
+            for pattern in adresse_patterns:
+                adresse_match = re.search(pattern, container_text, re.IGNORECASE | re.MULTILINE)
+                if adresse_match:
+                    break
+            
+            if not adresse_match:
+                print("[ERREUR] Impossible d'extraire l'adresse du conteneur")
+                return False
+            
+            adresse_cible = adresse_match.group(1).strip()
+            adresse_cible = re.sub(r'\s+', ' ', adresse_cible)
+            print(f"Adresse cible: {adresse_cible}")
+            
+            # Chercher les liens de propriété cliquables
+            self.driver.execute_script("window.scrollTo(0, 1000);")
+            time.sleep(1)
+            
+            property_links = self.driver.find_elements(
+                By.XPATH, 
+                "//a[contains(text(), 'Boul.') or contains(text(), 'Rue') or contains(text(), 'Av.') or contains(text(), 'Ch.') or contains(text(), 'Avenue')]"
+            )
+            
+            if not property_links:
+                all_links = self.driver.find_elements(By.TAG_NAME, "a")
+                property_links = [link for link in all_links 
+                                if link.text and len(link.text) > 10 
+                                and any(char.isdigit() for char in link.text)
+                                and ('Boul' in link.text or 'Rue' in link.text or 'Av.' in link.text or 'Avenue' in link.text)]
+            
+            print(f"Liens de proprietes trouves: {len(property_links)}")
+            
+            # Chercher le lien qui correspond à l'adresse cible
+            target_link = None
+            for link in property_links:
+                link_text = link.text.strip()
+                link_text_clean = re.sub(r'\s+', ' ', link_text)
+                adresse_clean = re.sub(r'\s+', ' ', adresse_cible)
+                
+                if adresse_clean in link_text_clean or link_text_clean in adresse_clean:
+                    target_link = link
+                    print(f"Lien correspondant trouve: {link_text[:60]}")
+                    break
+            
+            if not target_link:
+                print(f"[ERREUR] Aucun lien ne correspond a l'adresse: {adresse_cible}")
+                print("Liens disponibles:")
+                for i, link in enumerate(property_links[:10]):
+                    print(f"  {i}: {link.text[:60]}")
+                return False
+            
+            # Cliquer sur le lien et attendre le panneau
+            return self._click_and_wait_panel(target_link)
+                
+        except Exception as e:
+            print(f"Erreur lors du clic par Centris ID: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def extract_info_from_list_by_centris_id(self, centris_id):
+        """
+        Extrait les informations de la liste pour une propriété identifiée par son numéro Centris.
+        
+        Args:
+            centris_id: Numéro Centris de la propriété
+            
+        Returns:
+            dict: Informations de base extraites de la liste
+        """
+        print(f"\n=== Extraction des infos depuis la liste (Centris #{centris_id}) ===")
+        
+        list_data = {
+            'prix': None,
+            'adresse': None,
+            'ville': None,
+            'arrondissement': None,
+            'quartier': None,
+            'type_propriete': None,
+            'annee_construction': None,
+            'numero_centris': None,
+            'date_envoi': None,
+            'statut': None
+        }
+        
+        try:
+            time.sleep(2)
+            self.driver.execute_script("window.scrollTo(0, 1000);")
+            time.sleep(1)
+            
+            container, idx = self.find_container_by_centris_id(centris_id)
+            
+            if container is None:
+                print(f"[ATTENTION] Conteneur pour Centris #{centris_id} non trouvé")
+                return list_data
+            
+            container_text = container.get_text()
+            
+            print(f"\nTexte du conteneur (premiers 300 chars):")
+            print(container_text[:300])
+            print()
+            
+            # Extraire le prix
+            prix_match = re.search(r'([\d\s]+)\s*\$\s*(?:\+\s*(?:TPS|TVQ|taxes))?', container_text)
+            if prix_match:
+                list_data['prix'] = prix_match.group(1).replace(' ', '').strip()
+                print(f"[OK] Prix (liste): {list_data['prix']} $")
+            
+            # Extraire l'adresse
+            adresse_patterns = [
+                # Pattern pour "2020 27e Rue" (numero civique + ordinal + type de rue)
+                r'(\d+(?:-\d+[A-Z]*)?\s+\d+(?:e|er|re|ère)\s+(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)[A-Za-zÀ-ÿ\'\-\.\s]*)(?=\n|Québec|Lévis|$)',
+                r'(\d+(?:-\d+[A-Z]*)*\s+(?:(?:1re|2e|1er)\s+)?(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)\s+[A-Za-zÀ-ÿ\'\-\.\s]*?)(?=\n|Québec|Lévis|$)',
+                r'(\d+[A-Z]*(?:-\d+[A-Z]*)*\s+(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)\s+[A-Za-zÀ-ÿ\'\-\.\s]+?)(?=\n|Québec|Lévis|$)',
+                r'(\d+[A-Z]+-\d+[A-Z]+\s+(?:Boul\.|Av\.|Rue|Ch\.)\s+[^\n]+?)(?=\n)',
+                r'(\d+(?:-\d+)?\s+(?:Boul\.|Av\.|Rue|Ch\.)\s+[^\n]+?)(?=\n)',
+            ]
+            
+            for i, pattern in enumerate(adresse_patterns):
+                match = re.search(pattern, container_text, re.IGNORECASE | re.MULTILINE)
+                if match:
+                    adresse = match.group(1).strip()
+                    adresse = re.sub(r'\s+', ' ', adresse)
+                    adresse = adresse.strip()
+                    if len(adresse) > 5 and any(char.isdigit() for char in adresse):
+                        list_data['adresse'] = adresse
+                        print(f"[OK] Adresse (liste, pattern {i+1}): {list_data['adresse']}")
+                        break
+            
+            # Extraire ville et arrondissement - supporter Québec ET Lévis
+            ville_match = re.search(r'(Québec|Lévis)\s*\(([^)]+)\)', container_text)
+            if ville_match:
+                list_data['ville'] = ville_match.group(1).strip()
+                list_data['arrondissement'] = ville_match.group(2).strip()
+                print(f"[OK] Ville/Arrondissement (liste): {list_data['ville']} ({list_data['arrondissement']})")
+            
+            # Extraire le quartier
+            quartier_match = re.search(r'(?:dans le quartier|quartier)\s+([A-Za-zÀ-ÿ\s\-\/]+?)\s+construit', container_text, re.IGNORECASE)
+            if quartier_match:
+                list_data['quartier'] = quartier_match.group(1).strip()
+                print(f"[OK] Quartier (liste): {list_data['quartier']}")
+            
+            # Extraire le type de propriété
+            types = ['Quintuplex', 'Quadruplex', 'Triplex', 'Duplex', 'Maison', 'Condominium', 'Autre']
+            for type_prop in types:
+                if type_prop in container_text:
+                    list_data['type_propriete'] = type_prop
+                    print(f"[OK] Type (liste): {type_prop}")
+                    break
+            
+            # Extraire l'année de construction
+            year_match = re.search(r'construit\s+en\s+(\d{4})', container_text, re.IGNORECASE)
+            if year_match:
+                list_data['annee_construction'] = year_match.group(1)
+                print(f"[OK] Annee (liste): {list_data['annee_construction']}")
+            
+            # Extraire le numéro Centris
+            centris_match = re.search(r'No\s*Centris\s*[:\-]?\s*(\d+)', container_text, re.IGNORECASE)
+            if centris_match:
+                list_data['numero_centris'] = centris_match.group(1)
+                print(f"[OK] Numero Centris (liste): {list_data['numero_centris']}")
+            
+            # Extraire la date d'envoi
+            date_match = re.search(r"Date\s*d['']envoi\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})", container_text)
+            if date_match:
+                list_data['date_envoi'] = date_match.group(1)
+                print(f"[OK] Date d'envoi (liste): {list_data['date_envoi']}")
+            
+            # Extraire le statut
+            if 'Nouvelle annonce' in container_text:
+                list_data['statut'] = 'Nouvelle annonce'
+                print(f"[OK] Statut (liste): Nouvelle annonce")
+            elif 'Nouveau prix' in container_text:
+                list_data['statut'] = 'Nouveau prix'
+                print(f"[OK] Statut (liste): Nouveau prix")
+            
+            print("\n=== Fin extraction liste ===")
+            
+        except Exception as e:
+            print(f"[ERREUR] Erreur extraction liste: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        return list_data
+    
+    def scrape_property_by_centris_id(self, centris_id, skip_photos=False):
+        """
+        Scrape complet d'une propriété identifiée par son numéro Centris.
+        
+        Args:
+            centris_id: Numéro Centris de la propriété
+            skip_photos: Si True, ne pas extraire les URLs des photos
+            
+        Returns:
+            dict: Données complètes combinées
+        """
+        print("\n" + "="*80)
+        print(f"SCRAPING COMPLET PROPRIETE CENTRIS #{centris_id}" + (" [sans photos]" if skip_photos else ""))
+        print("="*80)
+        
+        # Étape 1: Extraire les infos de la liste par Centris ID
+        list_info = self.extract_info_from_list_by_centris_id(centris_id)
+        
+        # Étape 2: Cliquer sur la propriété par Centris ID
+        if not self.click_on_property_by_centris_id(centris_id):
+            print("[ERREUR] Impossible de cliquer sur la propriete")
+            return list_info  # Retourner au moins les infos de la liste
+        
+        # Étape 3: Extraire les détails du panneau
+        detail_info = self.extract_all_info_complete()
+        
+        # Étape 3.5: Photos
+        if skip_photos:
+            detail_info['photo_urls'] = []
+            detail_info['nb_photos'] = 0
+        else:
+            photo_urls = self.extract_photo_urls()
+            detail_info['photo_urls'] = photo_urls
+            detail_info['nb_photos'] = len(photo_urls)
+        
+        # Étape 4: Fusionner les données (priorité aux infos de la liste)
+        combined_data = detail_info.copy()
+        
+        priority_fields = ['adresse', 'ville', 'arrondissement', 'quartier', 'type_propriete', 
+                          'annee_construction', 'numero_centris', 'date_envoi', 'statut']
+        
+        for field in priority_fields:
+            if list_info.get(field) and not combined_data.get(field):
+                combined_data[field] = list_info[field]
+                print(f"[MERGE] {field}: utilise valeur de la liste")
+            elif list_info.get(field) and combined_data.get(field):
+                if list_info[field] != combined_data[field]:
+                    print(f"[MERGE] {field}: liste='{list_info[field]}' vs detail='{combined_data[field]}' -> garde liste")
+                    combined_data[field] = list_info[field]
+        
+        combined_data['_donnees_liste'] = list_info
+        
+        # Fermer le panneau de détail
+        print("\n=== Fermeture du panneau ===")
+        if self.close_panel():
+            print("[OK] Panneau ferme, retour a la liste")
+        else:
+            print("[WARNING] Echec fermeture panneau")
+        
+        return combined_data
+    
+    def _click_and_wait_panel(self, target_link):
+        """
+        Clique sur un lien et attend que le panneau de détail s'ouvre.
+        
+        Args:
+            target_link: Élément Selenium du lien à cliquer
+            
+        Returns:
+            bool: True si le panneau s'est ouvert
+        """
+        try:
+            url_before = self.driver.current_url
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_link)
+            time.sleep(0.5)
+            
+            target_link.click()
+            print("[INFO] Clic effectue, attente de l'ouverture du panneau...")
+            
+            panel_opened = False
+            for i in range(15):
+                time.sleep(0.5)
+                url_changed = '#' in self.driver.current_url and self.driver.current_url != url_before
+                try:
+                    html = self.driver.page_source
+                    panel_indicators = [
+                        'Caractéristiques du bâtiment',
+                        'Dimensions des pièces',
+                        'Revenus et dépenses',
+                        'Addenda',
+                        'Inclusions',
+                    ]
+                    panel_present = any(indicator in html for indicator in panel_indicators)
+                except:
+                    panel_present = False
+                
+                if url_changed or panel_present:
+                    print(f"[OK] Panneau detecte! (tentative {i+1})")
+                    if url_changed:
+                        print(f"     URL: {self.driver.current_url}")
+                    if panel_present:
+                        print(f"     Elements de detail detectes dans le DOM")
+                    time.sleep(3)
+                    panel_opened = True
+                    break
+            
+            if panel_opened:
+                return True
+            
+            # Fallback JavaScript
+            print("[INFO] Tentative avec clic JavaScript...")
+            self.driver.execute_script("arguments[0].click();", target_link)
+            
+            for i in range(15):
+                time.sleep(0.5)
+                url_changed = '#' in self.driver.current_url and self.driver.current_url != url_before
+                try:
+                    html = self.driver.page_source
+                    panel_indicators = ['Caractéristiques du bâtiment', 'Dimensions des pièces', 'Revenus et dépenses', 'Addenda', 'Inclusions']
+                    panel_present = any(indicator in html for indicator in panel_indicators)
+                except:
+                    panel_present = False
+                
+                if url_changed or panel_present:
+                    print(f"[OK] Panneau detecte (JS)! (tentative {i+1})")
+                    time.sleep(3)
+                    return True
+            
+            print("[ERREUR] Le panneau ne s'est pas ouvert apres toutes les tentatives")
+            return False
+            
+        except Exception as e:
+            print(f"[ERREUR] Echec du clic: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
     def click_on_property_by_index(self, index=0):
         """
         Version synchronisée avec extract_info_from_list()
@@ -25,26 +431,9 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
             print(f"\n=== Clic sur la propriete #{index+1} ===")
             time.sleep(2)
             
-            # MÊME LOGIQUE que extract_info_from_list() pour trouver les conteneurs
-            html = self.driver.page_source
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            # Trouver tous les blocs qui contiennent "No Centris"
-            all_text_blocks = soup.find_all(string=re.compile(r'No Centris', re.IGNORECASE))
-            
-            property_containers = []
-            for text_block in all_text_blocks:
-                parent = text_block.parent
-                for _ in range(5):
-                    if parent:
-                        parent_text = parent.get_text()
-                        if '$' in parent_text and 'Québec' in parent_text and 'No Centris' in parent_text:
-                            property_containers.append(parent)
-                            break
-                        try:
-                            parent = parent.parent
-                        except:
-                            break
+            # Utiliser la méthode centralisée pour trouver les conteneurs
+            containers = self._find_property_containers()
+            property_containers = [c[0] for c in containers]
             
             print(f"Conteneurs de proprietes trouves: {len(property_containers)}")
             
@@ -56,12 +445,20 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
             target_container = property_containers[index]
             container_text = target_container.get_text()
             
-            # Pattern d'extraction d'adresse (MÊME que extract_info_from_list)
-            adresse_match = re.search(
-                r'(\d+[A-Z]*(?:-\d+[A-Z]*)*\s+(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)\s+[A-Za-zÀ-ÿ\'\-\.\s]+?)(?=\n|Québec|$)',
-                container_text,
-                re.IGNORECASE | re.MULTILINE
-            )
+            # Patterns d'extraction d'adresse (priorité: adresse complète type "1209-1213 1re Avenue")
+            adresse_patterns = [
+                # Pattern pour "2020 27e Rue" (numero civique + ordinal + type de rue)
+                r'(\d+(?:-\d+[A-Z]*)?\s+\d+(?:e|er|re|ère)\s+(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)[A-Za-zÀ-ÿ\'\-\.\s]*)(?=\n|Québec|Lévis|$)',
+                # Pattern avec "1re"/"2e"/"1er" avant Avenue/Rue (ex: 1209-1213 1re Avenue)
+                r'(\d+(?:-\d+[A-Z]*)*\s+(?:(?:1re|2e|1er)\s+)?(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)\s+[A-Za-zÀ-ÿ\'\-\.\s]*?)(?=\n|Québec|Lévis|$)',
+                # Pattern standard (ex: 420 Boul. Pierre-Bertrand)
+                r'(\d+[A-Z]*(?:-\d+[A-Z]*)*\s+(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)\s+[A-Za-zÀ-ÿ\'\-\.\s]+?)(?=\n|Québec|Lévis|$)',
+            ]
+            adresse_match = None
+            for pattern in adresse_patterns:
+                adresse_match = re.search(pattern, container_text, re.IGNORECASE | re.MULTILINE)
+                if adresse_match:
+                    break
             
             if not adresse_match:
                 print("[ERREUR] Impossible d'extraire l'adresse du conteneur")
@@ -71,21 +468,21 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
             adresse_cible = re.sub(r'\s+', ' ', adresse_cible)
             print(f"Adresse cible: {adresse_cible}")
             
-            # Chercher TOUS les liens de propriété (comme la méthode originale)
+            # Chercher TOUS les liens de propriété (inclure "Avenue" en entier pour 1re Avenue, etc.)
             self.driver.execute_script("window.scrollTo(0, 1000);")
             time.sleep(1)
             
             property_links = self.driver.find_elements(
                 By.XPATH, 
-                "//a[contains(text(), 'Boul.') or contains(text(), 'Rue') or contains(text(), 'Av.') or contains(text(), 'Ch.')]"
+                "//a[contains(text(), 'Boul.') or contains(text(), 'Rue') or contains(text(), 'Av.') or contains(text(), 'Ch.') or contains(text(), 'Avenue')]"
             )
             
             if not property_links:
                 all_links = self.driver.find_elements(By.TAG_NAME, "a")
                 property_links = [link for link in all_links 
-                                if link.text and len(link.text) > 15 
+                                if link.text and len(link.text) > 10 
                                 and any(char.isdigit() for char in link.text)
-                                and ('Boul' in link.text or 'Rue' in link.text or 'Av.' in link.text)]
+                                and ('Boul' in link.text or 'Rue' in link.text or 'Av.' in link.text or 'Avenue' in link.text)]
             
             print(f"Liens de proprietes trouves: {len(property_links)}")
             
@@ -111,80 +508,8 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
                     print(f"  {i}: {link.text[:60]}")
                 return False
             
-            # Cliquer sur le lien trouvé
-            try:
-                url_before = self.driver.current_url
-                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_link)
-                time.sleep(0.5)
-                
-                # Essayer clic normal d'abord
-                target_link.click()
-                print("[INFO] Clic effectue, attente de l'ouverture du panneau...")
-                
-                # Attendre que le panneau se charge (vérifier présence d'éléments de détail)
-                panel_opened = False
-                for i in range(15):  # Augmenté à 15 tentatives (7.5 secondes)
-                    time.sleep(0.5)
-                    
-                    # Méthode 1: Vérifier le changement d'URL
-                    url_changed = '#' in self.driver.current_url and self.driver.current_url != url_before
-                    
-                    # Méthode 2: Vérifier la présence d'éléments du panneau de détail
-                    # Chercher des éléments typiques du panneau (prix, description détaillée, etc.)
-                    try:
-                        html = self.driver.page_source
-                        # Le panneau contient généralement des sections détaillées
-                        panel_indicators = [
-                            'Caractéristiques du bâtiment',
-                            'Dimensions des pièces',
-                            'Revenus et dépenses',
-                            'Addenda',
-                            'Inclusions',
-                        ]
-                        panel_present = any(indicator in html for indicator in panel_indicators)
-                    except:
-                        panel_present = False
-                    
-                    if url_changed or panel_present:
-                        print(f"[OK] Panneau detecte! (tentative {i+1})")
-                        if url_changed:
-                            print(f"     URL: {self.driver.current_url}")
-                        if panel_present:
-                            print(f"     Elements de detail detectes dans le DOM")
-                        time.sleep(3)  # Attente supplémentaire pour chargement complet
-                        panel_opened = True
-                        break
-                
-                if panel_opened:
-                    return True
-                
-                # Si ça n'a pas marché, essayer avec JavaScript
-                print("[INFO] Tentative avec clic JavaScript...")
-                self.driver.execute_script("arguments[0].click();", target_link)
-                
-                for i in range(15):
-                    time.sleep(0.5)
-                    url_changed = '#' in self.driver.current_url and self.driver.current_url != url_before
-                    try:
-                        html = self.driver.page_source
-                        panel_indicators = ['Caractéristiques du bâtiment', 'Dimensions des pièces', 'Revenus et dépenses', 'Addenda', 'Inclusions']
-                        panel_present = any(indicator in html for indicator in panel_indicators)
-                    except:
-                        panel_present = False
-                    
-                    if url_changed or panel_present:
-                        print(f"[OK] Panneau detecte (JS)! (tentative {i+1})")
-                        time.sleep(3)
-                        return True
-                
-                print("[ERREUR] Le panneau ne s'est pas ouvert apres toutes les tentatives")
-                return False
-                
-            except Exception as e:
-                print(f"[ERREUR] Echec du clic: {e}")
-                import traceback
-                traceback.print_exc()
-                return False
+            # Cliquer sur le lien et attendre le panneau
+            return self._click_and_wait_panel(target_link)
                 
         except Exception as e:
             print(f"Erreur lors du clic: {e}")
@@ -225,31 +550,9 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
             self.driver.execute_script("window.scrollTo(0, 1000);")
             time.sleep(1)
             
-            # Obtenir tous les conteneurs de propriétés
-            # Essayer plusieurs sélecteurs possibles
-            property_containers = []
-            
-            # Méthode 1: Chercher par structure (divs qui contiennent prix + adresse + Centris)
-            html = self.driver.page_source
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            # Trouver tous les blocs qui contiennent "No Centris"
-            all_text_blocks = soup.find_all(string=re.compile(r'No Centris', re.IGNORECASE))
-            
-            for text_block in all_text_blocks:
-                # Remonter pour trouver le conteneur parent
-                parent = text_block.parent
-                for _ in range(5):
-                    if parent:
-                        parent_text = parent.get_text()
-                        # Vérifier si ce bloc contient prix, adresse et No Centris
-                        if '$' in parent_text and 'Québec' in parent_text and 'No Centris' in parent_text:
-                            property_containers.append(parent)
-                            break
-                        try:
-                            parent = parent.parent
-                        except:
-                            break
+            # Utiliser la méthode centralisée pour trouver les conteneurs
+            containers = self._find_property_containers()
+            property_containers = [c[0] for c in containers]
             
             print(f"Conteneurs de proprietes trouves: {len(property_containers)}")
             
@@ -272,13 +575,12 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
                 print(f"[OK] Prix (liste): {list_data['prix']} $")
             
             # Extraire l'adresse (format: numéro + type de rue + nom)
-            # Format typique: "220Z-226BZ Boul. Pierre-Bertrand"
             adresse_patterns = [
-                # Pattern 1: Numéro (avec lettres et tirets) + Boul./Av./Rue + Nom
-                r'(\d+[A-Z]*(?:-\d+[A-Z]*)*\s+(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)\s+[A-Za-zÀ-ÿ\'\-\.\s]+?)(?=\n|Québec|$)',
-                # Pattern 2: Chercher spécifiquement les adresses avec tirets
+                # Pattern pour "2020 27e Rue" (numero civique + ordinal + type de rue)
+                r'(\d+(?:-\d+[A-Z]*)?\s+\d+(?:e|er|re|ère)\s+(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)[A-Za-zÀ-ÿ\'\-\.\s]*)(?=\n|Québec|Lévis|$)',
+                r'(\d+(?:-\d+[A-Z]*)*\s+(?:(?:1re|2e|1er)\s+)?(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)\s+[A-Za-zÀ-ÿ\'\-\.\s]*?)(?=\n|Québec|Lévis|$)',
+                r'(\d+[A-Z]*(?:-\d+[A-Z]*)*\s+(?:Boul\.|Boulevard|Av\.|Avenue|Rue|Ch\.|Chemin|Route)\s+[A-Za-zÀ-ÿ\'\-\.\s]+?)(?=\n|Québec|Lévis|$)',
                 r'(\d+[A-Z]+-\d+[A-Z]+\s+(?:Boul\.|Av\.|Rue|Ch\.)\s+[^\n]+?)(?=\n)',
-                # Pattern 3: Format simple
                 r'(\d+(?:-\d+)?\s+(?:Boul\.|Av\.|Rue|Ch\.)\s+[^\n]+?)(?=\n)',
             ]
             
@@ -286,21 +588,18 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
                 match = re.search(pattern, container_text, re.IGNORECASE | re.MULTILINE)
                 if match:
                     adresse = match.group(1).strip()
-                    # Nettoyer l'adresse (enlever espaces multiples, retours à la ligne)
                     adresse = re.sub(r'\s+', ' ', adresse)
                     adresse = adresse.strip()
-                    
-                    # Vérifier que l'adresse est valide (contient au moins un chiffre et un mot)
                     if len(adresse) > 5 and any(char.isdigit() for char in adresse):
                         list_data['adresse'] = adresse
                         print(f"[OK] Adresse (liste, pattern {i+1}): {list_data['adresse']}")
                         break
             
-            # Extraire ville et arrondissement (format: Québec (Arrondissement))
-            ville_match = re.search(r'Québec\s*\(([^)]+)\)', container_text)
+            # Extraire ville et arrondissement - supporter Québec ET Lévis
+            ville_match = re.search(r'(Québec|Lévis)\s*\(([^)]+)\)', container_text)
             if ville_match:
-                list_data['ville'] = 'Québec'
-                list_data['arrondissement'] = ville_match.group(1).strip()
+                list_data['ville'] = ville_match.group(1).strip()
+                list_data['arrondissement'] = ville_match.group(2).strip()
                 print(f"[OK] Ville/Arrondissement (liste): {list_data['ville']} ({list_data['arrondissement']})")
             
             # Extraire le quartier (format: "dans le quartier XXX construit")
@@ -661,18 +960,19 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
         
         return photo_urls
     
-    def scrape_property_with_list_info(self, index=0):
+    def scrape_property_with_list_info(self, index=0, skip_photos=False):
         """
         Scrape complet: d'abord les infos de la liste, puis les détails du panneau
         
         Args:
             index: Index de la propriété
+            skip_photos: Si True, ne pas extraire les URLs des photos (plus rapide)
             
         Returns:
             dict: Données complètes combinées
         """
         print("\n" + "="*80)
-        print(f"SCRAPING COMPLET PROPRIETE #{index+1} (LISTE + DETAILS)")
+        print(f"SCRAPING COMPLET PROPRIETE #{index+1} (LISTE + DETAILS)" + (" [sans photos]" if skip_photos else ""))
         print("="*80)
         
         # Étape 1: Extraire les infos de la liste
@@ -686,10 +986,14 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
         # Étape 3: Extraire les détails du panneau
         detail_info = self.extract_all_info_complete()
         
-        # Étape 3.5: Extraire les URLs des photos
-        photo_urls = self.extract_photo_urls()
-        detail_info['photo_urls'] = photo_urls
-        detail_info['nb_photos'] = len(photo_urls)
+        # Étape 3.5: Extraire les URLs des photos (sauf si skip_photos=True pour gagner du temps)
+        if skip_photos:
+            detail_info['photo_urls'] = []
+            detail_info['nb_photos'] = 0
+        else:
+            photo_urls = self.extract_photo_urls()
+            detail_info['photo_urls'] = photo_urls
+            detail_info['nb_photos'] = len(photo_urls)
         
         # Étape 4: Fusionner les données (priorité aux infos de la liste pour certains champs)
         combined_data = detail_info.copy()

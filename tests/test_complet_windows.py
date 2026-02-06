@@ -254,7 +254,7 @@ def test_extraction_complete():
         try:
             from config_api import API_ENDPOINT
         except:
-            API_ENDPOINT = "https://api.rayharvey.ca/robot/api/scraping"
+            API_ENDPOINT = "https://apidev.rayharvey.ca/robot/api/scraping"
         
         print(f"  Endpoint: {API_ENDPOINT}")
         print(f"  Content-Type: application/json")

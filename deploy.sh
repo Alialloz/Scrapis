@@ -49,6 +49,7 @@ ssh $SERVER_USER@$SERVER_IP << 'EOF'
 cd /opt/scraper-centris
 tar -xzf /tmp/scraper-centris.tar.gz
 rm /tmp/scraper-centris.tar.gz
+mkdir -p logs
 echo "[OK] Code decompresse"
 EOF
 
@@ -67,7 +68,9 @@ echo "    DEPLOIEMENT TERMINE!"
 echo "========================================================================"
 echo ""
 echo "Commandes utiles:"
-echo "  - Voir les logs:        ssh $SERVER_USER@$SERVER_IP 'tail -f /var/log/scraper-centris.log'"
+echo "  - Logs systemd:         ssh $SERVER_USER@$SERVER_IP 'tail -f /var/log/scraper-centris.log'"
+echo "  - Logs applicatifs:      ssh $SERVER_USER@$SERVER_IP 'tail -f /opt/scraper-centris/logs/production.log'"
+echo "  - Analyser les logs:    ssh $SERVER_USER@$SERVER_IP 'cd /opt/scraper-centris && python3.12 analyze_logs.py'"
 echo "  - Statut du service:    ssh $SERVER_USER@$SERVER_IP 'systemctl status scraper-centris'"
 echo "  - Arreter le service:   ssh $SERVER_USER@$SERVER_IP 'systemctl stop scraper-centris'"
 echo ""
