@@ -209,6 +209,9 @@ class CentrisProductionMonitor(CentrisMonitor):
                             stats['sent_to_api'] += 1
                         
                         # Marquer comme scrapé
+                        if isinstance(self.scraped_ids, list):
+                            # Convertir la liste en dict si nécessaire
+                            self.scraped_ids = {str(sid): "" for sid in self.scraped_ids}
                         self.scraped_ids[centris_id] = datetime.now().isoformat()
                         self.save_scraped_ids()
                         

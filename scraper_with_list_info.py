@@ -663,25 +663,36 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
         photo_urls = []
         
         try:
-            # AVANT de cliquer, extraire les IDs des photos depuis les vignettes visibles
-            print("Extraction des IDs de photos depuis le panneau actuel...")
+            # AVANT de cliquer, extraire les URLs de photos depuis les balises <img> du panneau
+            print("Extraction des URLs de photos depuis le panneau actuel...")
             html_before = self.driver.page_source
+            soup_panel = BeautifulSoup(html_before, 'html.parser')
             
-            # Chercher toutes les URLs d'images matrixmedia dans le panneau
+            # Extraire les vraies URLs complètes depuis les balises <img> (inclut le paramètre exk)
             import re
-            pattern = r'https?://matrixmedia\.centris\.ca/MediaServer/GetMedia\.ashx\?[^"\'<>\s]+'
-            all_media_before = re.findall(pattern, html_before)
+            matrixmedia_img_urls = []
+            for img in soup_panel.find_all('img'):
+                src = img.get('src') or ''
+                if 'matrixmedia.centris.ca/MediaServer/GetMedia.ashx' in src:
+                    matrixmedia_img_urls.append(src)
             
+            # Aussi chercher les URLs mspublic dans les balises <img>
+            mspublic_img_urls = []
+            for img in soup_panel.find_all('img'):
+                src = img.get('src') or ''
+                if 'mspublic.centris.ca/media.ashx' in src:
+                    mspublic_img_urls.append(src)
+            
+            print(f"[INFO] {len(matrixmedia_img_urls)} URLs matrixmedia et {len(mspublic_img_urls)} URLs mspublic dans les <img>")
+            
+            # Extraire les photo_ids pour compatibilité
             photo_ids = []
-            for url in all_media_before:
-                # Extraire le Key (ID de la photo)
+            for url in matrixmedia_img_urls:
                 key_match = re.search(r'Key=(\d+)', url)
                 if key_match:
                     photo_id = key_match.group(1)
                     if photo_id not in photo_ids:
                         photo_ids.append(photo_id)
-            
-            print(f"[INFO] {len(photo_ids)} ID(s) de photos trouvés")
             
             # Chercher le lien/bouton "Voir toutes les photos"
             photo_button_selectors = [
@@ -703,16 +714,90 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
                     continue
             
             if not photo_button:
-                print("[INFO] Bouton photos non trouvé, utilisation des IDs trouvés")
-                # Construire les URLs avec les IDs trouvés
-                if photo_ids:
-                    for i, photo_id in enumerate(photo_ids):
-                        # Construire l'URL en haute résolution
-                        # Size=2 pour taille moyenne, Size=4 pour grande taille
-                        photo_url = f"https://matrixmedia.centris.ca/MediaServer/GetMedia.ashx?Key={photo_id}&TableID=1&Type=1&Number={i}&Size=4"
-                        photo_urls.append(photo_url)
+                print("[INFO] Bouton photos non trouvé, recherche de liens galerie publique...")
                 
-                print(f"[OK] {len(photo_urls)} URLs de photos générées")
+                # Méthode 1 (prioritaire): Naviguer vers la galerie publique centris.ca
+                # Chercher les liens centris.ca/fr/propriete/.../photos?etok=...&seq=N
+                gallery_pattern = r'https?://www\.centris\.ca/fr/propriete/\d+/photos\?[^"\'<>\s]+'
+                gallery_links_raw = re.findall(gallery_pattern, html_before)
+                gallery_links = []
+                seen_gallery = set()
+                for link in gallery_links_raw:
+                    clean = link.replace('&amp;', '&')
+                    if clean not in seen_gallery:
+                        seen_gallery.add(clean)
+                        gallery_links.append(clean)
+                
+                if gallery_links:
+                    print(f"[OK] {len(gallery_links)} liens de galerie publique trouvés")
+                    current_window = self.driver.current_window_handle
+                    
+                    for i, gallery_url in enumerate(gallery_links):
+                        print(f"  Navigation galerie photo {i+1}/{len(gallery_links)}...")
+                        try:
+                            # Ouvrir dans un nouvel onglet
+                            self.driver.execute_script(f"window.open('{gallery_url}', '_blank');")
+                            time.sleep(4)
+                            
+                            # Basculer vers le nouvel onglet
+                            for window in self.driver.window_handles:
+                                if window != current_window:
+                                    self.driver.switch_to.window(window)
+                                    break
+                            
+                            time.sleep(2)
+                            
+                            # Extraire l'image principale (grande, pas vignette) mspublic
+                            gallery_html = self.driver.page_source
+                            gallery_soup = BeautifulSoup(gallery_html, 'html.parser')
+                            found_photo = False
+                            for img in gallery_soup.find_all('img'):
+                                src = img.get('src') or ''
+                                if 'mspublic.centris.ca/media.ashx' in src:
+                                    # Vérifier que c'est la grande image (pas une vignette)
+                                    if 'w=100' not in src and 'h=75' not in src and 'w=50' not in src:
+                                        if src not in photo_urls:
+                                            photo_urls.append(src)
+                                            print(f"    [OK] Photo {i+1}: {src[:80]}...")
+                                            found_photo = True
+                                            break
+                            
+                            if not found_photo:
+                                print(f"    [WARN] Photo {i+1}: aucune URL mspublic haute résolution trouvée")
+                            
+                            # Fermer l'onglet et revenir
+                            self.driver.close()
+                            self.driver.switch_to.window(current_window)
+                            time.sleep(1)
+                            
+                        except Exception as e:
+                            print(f"    [ERREUR] Photo {i+1}: {e}")
+                            # S'assurer de revenir à la fenêtre principale
+                            try:
+                                if len(self.driver.window_handles) > 1:
+                                    self.driver.close()
+                                self.driver.switch_to.window(current_window)
+                            except:
+                                pass
+                    
+                    if photo_urls:
+                        print(f"[OK] {len(photo_urls)} photos extraites depuis la galerie publique centris.ca")
+                        return photo_urls
+                
+                # Méthode 2: URLs mspublic déjà présentes dans les <img> du panneau
+                if mspublic_img_urls:
+                    seen = set()
+                    for url in mspublic_img_urls:
+                        clean_url = url.replace('&amp;', '&')
+                        if 'w=100' not in clean_url and 'h=75' not in clean_url and 'w=50' not in clean_url:
+                            if clean_url not in seen:
+                                seen.add(clean_url)
+                                photo_urls.append(clean_url)
+                    if photo_urls:
+                        print(f"[OK] {len(photo_urls)} URLs mspublic trouvées dans les <img> du panneau")
+                        return photo_urls
+                
+                print(f"[WARN] Aucune URL de photo exploitable trouvée")
                 return photo_urls
             
             # Extraire le nombre total de photos depuis le bouton

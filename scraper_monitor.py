@@ -60,6 +60,13 @@ class CentrisMonitor:
             try:
                 with open(self.storage_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                    # S'assurer que c'est un dict, pas une liste
+                    if isinstance(data, list):
+                        logger.warning(f"Format liste détecté dans {self.storage_file}, conversion en dict")
+                        data = {str(sid): "" for sid in data}
+                    elif not isinstance(data, dict):
+                        logger.warning(f"Format inattendu dans {self.storage_file}, réinitialisation")
+                        data = {}
                     logger.info(f"{len(data)} annonces déjà scrapées chargées depuis {self.storage_file}")
                     return data
             except Exception as e:
@@ -274,22 +281,30 @@ class CentrisMonitor:
                 date_envoi = property_data.get('date_envoi')
                 if date_envoi:
                     try:
-                        # Comparer les dates
-                        if date_envoi < self.min_date:
-                            logger.info(f"Annonce trop ancienne: {date_envoi} < {self.min_date}")
-                            logger.info(f"Annonce {centris_id} ignorée")
-                            
-                            # ⚠️ IMPORTANT: Marquer comme scrapée pour éviter la boucle infinie
+                        date_trop_ancienne = date_envoi < self.min_date
+                    except Exception as e:
+                        logger.warning(f"Impossible de comparer la date: {e}")
+                        date_trop_ancienne = False
+                    
+                    if date_trop_ancienne:
+                        logger.info(f"Annonce trop ancienne: {date_envoi} < {self.min_date}")
+                        logger.info(f"Annonce {centris_id} ignorée")
+                        
+                        # Marquer comme scrapée pour éviter la boucle infinie
+                        try:
+                            if isinstance(self.scraped_ids, list):
+                                # Convertir la liste en dict si nécessaire
+                                self.scraped_ids = {str(sid): "" for sid in self.scraped_ids}
                             self.scraped_ids[centris_id] = datetime.now().isoformat()
                             self.save_scraped_ids()
                             logger.info(f"✓ Annonce {centris_id} marquée comme scrapée (filtrée)")
-                            
-                            scraper.close()
-                            return None
-                        else:
-                            logger.debug(f"Date valide: {date_envoi} >= {self.min_date}")
-                    except Exception as e:
-                        logger.warning(f"Impossible de vérifier la date: {e}")
+                        except Exception as e:
+                            logger.warning(f"Erreur sauvegarde scraped_ids: {e}")
+                        
+                        scraper.close()
+                        return None
+                    else:
+                        logger.debug(f"Date valide: {date_envoi} >= {self.min_date}")
                 else:
                     logger.warning(f"Pas de date_envoi trouvée pour {centris_id}")
             
