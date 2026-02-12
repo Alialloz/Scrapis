@@ -476,10 +476,10 @@ def main():
     logger.info(f"✓ URL Matrix: {MATRIX_URL}")
     logger.info(f"✓ Intervalle: {MONITORING_INTERVAL} minutes")
     logger.info(f"✓ Fichier de stockage: {STORAGE_FILE}")
-    logger.info(f"✓ Date minimale: 2026-01-26 (annonces antérieures ignorées)")
+    logger.info(f"✓ Date minimale: 2026-02-10 (annonces antérieures ignorées)")
     
     # Créer le moniteur
-    monitor = CentrisProductionMonitor(min_date='2026-02-06', skip_photos=False)
+    monitor = CentrisProductionMonitor(min_date='2026-02-10', skip_photos=False)
     
     # Lancer le monitoring continu
     logger.info("Lancement du monitoring continu...")

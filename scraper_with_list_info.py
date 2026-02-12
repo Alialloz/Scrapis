@@ -120,7 +120,7 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
             
             property_links = self.driver.find_elements(
                 By.XPATH, 
-                "//a[contains(text(), 'Boul.') or contains(text(), 'Rue') or contains(text(), 'Av.') or contains(text(), 'Ch.') or contains(text(), 'Avenue')]"
+                "//a[contains(text(), 'Boul.') or contains(text(), 'Boulevard') or contains(text(), 'Rue') or contains(text(), 'Av.') or contains(text(), 'Avenue') or contains(text(), 'Ch.') or contains(text(), 'Chemin') or contains(text(), 'Route') or contains(text(), 'Place') or contains(text(), 'Allée') or contains(text(), 'Rang') or contains(text(), 'Côte') or contains(text(), 'Montée')]"
             )
             
             if not property_links:
@@ -128,7 +128,7 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
                 property_links = [link for link in all_links 
                                 if link.text and len(link.text) > 10 
                                 and any(char.isdigit() for char in link.text)
-                                and ('Boul' in link.text or 'Rue' in link.text or 'Av.' in link.text or 'Avenue' in link.text)]
+                                and ('Boul' in link.text or 'Rue' in link.text or 'Av.' in link.text or 'Avenue' in link.text or 'Ch.' in link.text or 'Chemin' in link.text or 'Route' in link.text or 'Place' in link.text or 'Allée' in link.text or 'Rang' in link.text or 'Côte' in link.text or 'Montée' in link.text)]
             
             print(f"Liens de proprietes trouves: {len(property_links)}")
             
@@ -474,7 +474,7 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
             
             property_links = self.driver.find_elements(
                 By.XPATH, 
-                "//a[contains(text(), 'Boul.') or contains(text(), 'Rue') or contains(text(), 'Av.') or contains(text(), 'Ch.') or contains(text(), 'Avenue')]"
+                "//a[contains(text(), 'Boul.') or contains(text(), 'Boulevard') or contains(text(), 'Rue') or contains(text(), 'Av.') or contains(text(), 'Avenue') or contains(text(), 'Ch.') or contains(text(), 'Chemin') or contains(text(), 'Route') or contains(text(), 'Place') or contains(text(), 'Allée') or contains(text(), 'Rang') or contains(text(), 'Côte') or contains(text(), 'Montée')]"
             )
             
             if not property_links:
@@ -482,7 +482,7 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
                 property_links = [link for link in all_links 
                                 if link.text and len(link.text) > 10 
                                 and any(char.isdigit() for char in link.text)
-                                and ('Boul' in link.text or 'Rue' in link.text or 'Av.' in link.text or 'Avenue' in link.text)]
+                                and ('Boul' in link.text or 'Rue' in link.text or 'Av.' in link.text or 'Avenue' in link.text or 'Ch.' in link.text or 'Chemin' in link.text or 'Route' in link.text or 'Place' in link.text or 'Allée' in link.text or 'Rang' in link.text or 'Côte' in link.text or 'Montée' in link.text)]
             
             print(f"Liens de proprietes trouves: {len(property_links)}")
             

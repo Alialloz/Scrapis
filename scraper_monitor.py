@@ -261,52 +261,54 @@ class CentrisMonitor:
             scraper.driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(1)
             
-            # Scraper directement par numéro Centris (plus fiable que le mapping par index)
-            logger.info(f"Scraping direct par Centris ID: {centris_id}")
+            # ÉTAPE 1: Extraire d'abord les infos de la LISTE (rapide, pas de clic)
+            logger.info(f"Extraction rapide des infos liste pour Centris ID: {centris_id}")
+            list_info = scraper.extract_info_from_list_by_centris_id(centris_id)
+            
+            # ÉTAPE 2: FILTRE DE DATE AVANT le scraping complet (économise le temps des photos)
+            date_envoi = list_info.get('date_envoi')
+            if date_envoi:
+                try:
+                    date_trop_ancienne = date_envoi < self.min_date
+                except Exception as e:
+                    logger.warning(f"Impossible de comparer la date: {e}")
+                    date_trop_ancienne = False
+                
+                if date_trop_ancienne:
+                    logger.info(f"Annonce trop ancienne: {date_envoi} < {self.min_date} (filtré AVANT scraping détail)")
+                    logger.info(f"Annonce {centris_id} ignorée")
+                    
+                    # Marquer comme scrapée pour éviter la boucle infinie
+                    try:
+                        if isinstance(self.scraped_ids, list):
+                            self.scraped_ids = {str(sid): "" for sid in self.scraped_ids}
+                        self.scraped_ids[centris_id] = datetime.now().isoformat()
+                        self.save_scraped_ids()
+                        logger.info(f"✓ Annonce {centris_id} marquée comme scrapée (filtrée)")
+                    except Exception as e:
+                        logger.warning(f"Erreur sauvegarde scraped_ids: {e}")
+                    
+                    scraper.close()
+                    return None
+                else:
+                    logger.info(f"Date valide: {date_envoi} >= {self.min_date} → scraping complet")
+            else:
+                logger.warning(f"Pas de date_envoi trouvée pour {centris_id}, scraping complet par précaution")
+            
+            # ÉTAPE 3: Scraping complet (détails + photos) seulement si date OK
+            logger.info(f"Scraping complet par Centris ID: {centris_id}")
             property_data = scraper.scrape_property_by_centris_id(centris_id, skip_photos=self.skip_photos)
             
             # Vérifier que le numéro Centris correspond bien
             if property_data:
                 scraped_centris = property_data.get('numero_centris')
                 if scraped_centris and scraped_centris != centris_id:
-                    # ⚠️ Ne PAS écraser le Centris ID -- rejeter les données incorrectes
                     logger.error(f"Numéro Centris ne correspond pas! Attendu: {centris_id}, Obtenu: {scraped_centris}")
                     logger.error(f"Données rejetées pour éviter de mélanger les propriétés")
                     scraper.close()
                     return None
                 else:
                     logger.debug(f"Numéro Centris vérifié: {scraped_centris}")
-                
-                # FILTRE DE DATE: Vérifier que l'annonce est assez récente
-                date_envoi = property_data.get('date_envoi')
-                if date_envoi:
-                    try:
-                        date_trop_ancienne = date_envoi < self.min_date
-                    except Exception as e:
-                        logger.warning(f"Impossible de comparer la date: {e}")
-                        date_trop_ancienne = False
-                    
-                    if date_trop_ancienne:
-                        logger.info(f"Annonce trop ancienne: {date_envoi} < {self.min_date}")
-                        logger.info(f"Annonce {centris_id} ignorée")
-                        
-                        # Marquer comme scrapée pour éviter la boucle infinie
-                        try:
-                            if isinstance(self.scraped_ids, list):
-                                # Convertir la liste en dict si nécessaire
-                                self.scraped_ids = {str(sid): "" for sid in self.scraped_ids}
-                            self.scraped_ids[centris_id] = datetime.now().isoformat()
-                            self.save_scraped_ids()
-                            logger.info(f"✓ Annonce {centris_id} marquée comme scrapée (filtrée)")
-                        except Exception as e:
-                            logger.warning(f"Erreur sauvegarde scraped_ids: {e}")
-                        
-                        scraper.close()
-                        return None
-                    else:
-                        logger.debug(f"Date valide: {date_envoi} >= {self.min_date}")
-                else:
-                    logger.warning(f"Pas de date_envoi trouvée pour {centris_id}")
             
             scraper.close()
             return property_data
