@@ -235,7 +235,7 @@ class CentrisDetailScraperComplete:
         return financial_data
     
     def extract_units_info(self, page_text):
-        """Extrait le nombre d'unités résidentielles et commerciales"""
+        """Extrait le nombre d'unités résidentielles et commerciales via la ligne Total de chaque section"""
         units_data = {
             'residentielles': [],
             'commerciales': [],
@@ -244,35 +244,38 @@ class CentrisDetailScraperComplete:
         }
         
         try:
-            # Unités résidentielles (format: "3 ½" "3", "4 ½" "2")
-            unit_patterns = [
-                r'(\d)\s*½\s*(\d+)',
-                r'(\d)\s+½\s+(\d+)',
-            ]
+            # Isoler la section "Nombre d'unités" pour ne pas confondre avec les données financières
+            units_section_match = re.search(
+                r"Nombre\s+d[\u2019']unit[ée]s(.+?)(?:Caract[ée]ristiques|Inclusions|Exclusions|Remarques|Addenda|D[ée]penses|Revenus|$)",
+                page_text,
+                re.DOTALL | re.IGNORECASE
+            )
+
+            if units_section_match:
+                section = units_section_match.group(1)
+
+                # Total résidentiel dans cette section
+                residentiel_match = re.search(
+                    r'R[ée]sidentiel.*?Total\s+(\d+)',
+                    section,
+                    re.DOTALL | re.IGNORECASE
+                )
+                if residentiel_match:
+                    units_data['total_residentiel'] = int(residentiel_match.group(1))
+
+                # Total commercial dans cette section
+                commercial_match = re.search(
+                    r'Commerciale?s?.*?Total\s+(\d+)',
+                    section,
+                    re.DOTALL | re.IGNORECASE
+                )
+                if commercial_match:
+                    units_data['total_commercial'] = int(commercial_match.group(1))
             
-            for pattern in unit_patterns:
-                matches = re.findall(pattern, page_text)
-                for match in matches:
-                    type_unit = f"{match[0]} 1/2"
-                    nombre = match[1]
-                    units_data['residentielles'].append({
-                        'type': type_unit,
-                        'nombre': nombre
-                    })
-                    units_data['total_residentiel'] += int(nombre)
-            
-            # Commercial
-            match = re.search(r'Commercial\s*(\d+)', page_text)
-            if match:
-                nombre = match.group(1)
-                units_data['commerciales'].append({
-                    'type': 'Commercial',
-                    'nombre': nombre
-                })
-                units_data['total_commercial'] = int(nombre)
-            
-            if units_data['residentielles'] or units_data['commerciales']:
+            if units_data['total_residentiel'] or units_data['total_commercial']:
                 print(f"[OK] Unites: {units_data['total_residentiel']} resid., {units_data['total_commercial']} comm.")
+            else:
+                print("[INFO] Aucune section 'Nombre d'unites' trouvee")
             
         except Exception as e:
             print(f"Erreur extraction unites: {e}")
