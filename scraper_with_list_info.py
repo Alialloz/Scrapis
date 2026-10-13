@@ -834,6 +834,36 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
                 # C'est la même fenêtre, peut-être un overlay/modal
                 print("[INFO] Galerie ouverte dans la même fenêtre")
             
+            # MÉTHODE 0 (prioritaire): la galerie liste toutes les miniatures
+            # (w=100&h=75). Chaque id de miniature donne la grande image en
+            # changeant seulement les paramètres de taille. Plus fiable que la
+            # navigation au clavier, qui ne passait plus qu'à la 1re photo.
+            try:
+                thumb_soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                thumb_ids = []
+                for img in thumb_soup.find_all('img'):
+                    src = (img.get('src') or img.get('data-src') or '').replace('&amp;', '&')
+                    if 'mspublic.centris.ca/media.ashx' in src and 'w=100' in src and 'h=75' in src:
+                        id_match = re.search(r'[?&]id=([A-Za-z0-9]+)', src)
+                        if id_match and id_match.group(1) not in thumb_ids:
+                            thumb_ids.append(id_match.group(1))
+
+                if thumb_ids:
+                    thumb_photos = [
+                        f"https://mspublic.centris.ca/media.ashx?id={pid}&t=pi&sm=m&w=1024&h=1024"
+                        for pid in thumb_ids
+                    ]
+                    print(f"[OK] {len(thumb_photos)} photos extraites depuis les miniatures de la galerie "
+                          f"(annoncées: {total_photos})")
+                    if len(self.driver.window_handles) > 1:
+                        self.driver.close()
+                        self.driver.switch_to.window(current_window)
+                        print("[OK] Retour à la fenêtre principale")
+                    return thumb_photos
+                print("[INFO] Aucune miniature trouvée, navigation au carrousel")
+            except Exception as e:
+                print(f"[WARNING] Extraction par miniatures échouée: {e}")
+
             # MÉTHODE: Naviguer manuellement dans le carrousel photo par photo
             print(f"Navigation dans le carrousel pour extraire les {total_photos} photos...")
             high_res_photos = []
