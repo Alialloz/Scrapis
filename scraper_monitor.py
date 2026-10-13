@@ -48,6 +48,54 @@ class CentrisMonitor:
         logger.info(f"Filtre de date actif: annonces >= {self.min_date}")
         if self.skip_photos:
             logger.info("Mode skip_photos activé: extraction des photos désactivée")
+        self.source_name = None
+
+    def _centris_ids_in(self, page_source):
+        return set(re.findall(r'No Centris\s*:\s*(\d+)', page_source))
+
+    def _more_results_button(self, driver):
+        buttons = driver.find_elements(By.CSS_SELECTOR, "a[href*='getNextDisplaySet']")
+        return buttons[0] if buttons else None
+
+    def load_results(self, driver, centris_id=None, max_pages=40):
+        """
+        Charge les pages de résultats Matrix (« Voir plus de résultats »).
+
+        Sans centris_id, charge toutes les annonces de la recherche.
+        Avec centris_id, s'arrête dès que cette annonce est visible.
+        """
+        target = str(centris_id) if centris_id else None
+        for page in range(max_pages):
+            source = driver.page_source
+            ids = self._centris_ids_in(source)
+            if target and target in ids:
+                logger.info(f"Annonce {target} visible après {page} page(s) supplémentaire(s)")
+                return True
+
+            button = self._more_results_button(driver)
+            if button is None:
+                logger.info(f"Résultats complets: {len(ids)} annonces")
+                return target is None or target in ids
+
+            before = len(ids)
+            driver.execute_script("PortalResultsJs.getNextDisplaySet();")
+            loaded = False
+            for _ in range(20):
+                time.sleep(0.5)
+                source = driver.page_source
+                ids = self._centris_ids_in(source)
+                if target and target in ids:
+                    logger.info(f"Annonce {target} visible après {page + 1} page(s) supplémentaire(s)")
+                    return True
+                if len(ids) > before or self._more_results_button(driver) is None:
+                    loaded = True
+                    break
+            if not loaded:
+                logger.warning("La page suivante n'a pas chargé, arrêt du chargement")
+                return False
+
+        logger.warning(f"Limite de {max_pages} pages atteinte")
+        return False
         
     def load_scraped_ids(self):
         """
@@ -126,33 +174,10 @@ class CentrisMonitor:
             logger.info(f"Chargement de la page: {self.url}")
             driver.get(self.url)
             time.sleep(5)
-            
-            # Faire défiler pour charger toutes les annonces
-            logger.info("Défilement pour charger toutes les annonces...")
-            last_height = driver.execute_script("return document.body.scrollHeight")
-            scroll_attempts = 0
-            max_scrolls = 10
-            
-            while scroll_attempts < max_scrolls:
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)
-                
-                new_height = driver.execute_script("return document.body.scrollHeight")
-                if new_height == last_height:
-                    break
-                last_height = new_height
-                scroll_attempts += 1
-                logger.debug(f"Scroll {scroll_attempts}/{max_scrolls}...")
-            
-            # Extraire tous les numéros Centris
-            import re
-            page_source = driver.page_source
-            
-            # Pattern pour trouver "No Centris : XXXXXXXX"
-            pattern = r'No Centris\s*:\s*(\d+)'
-            matches = re.findall(pattern, page_source)
-            
-            listing_ids = list(set(matches))  # Enlever les doublons
+
+            self.load_results(driver)
+
+            listing_ids = list(self._centris_ids_in(driver.page_source))
             
             logger.info(f"✓ {len(listing_ids)} annonces trouvées sur la page")
             
@@ -249,17 +274,14 @@ class CentrisMonitor:
             scraper = CentrisScraperWithListInfo()
             scraper.init_driver()
             
-            # Charger la page
+            # Charger la page, puis les pages suivantes jusqu'à trouver l'annonce
             logger.info("Chargement de la page...")
             scraper.driver.get(self.url)
             time.sleep(5)
-            
-            # Faire défiler pour charger toutes les annonces
-            logger.info("Défilement de la page...")
-            scraper.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
-            scraper.driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(1)
+            if not self.load_results(scraper.driver, centris_id):
+                logger.error(f"Annonce {centris_id} introuvable sur la page")
+                scraper.close()
+                return None
             
             # ÉTAPE 1: Extraire d'abord les infos de la LISTE (rapide, pas de clic)
             logger.info(f"Extraction rapide des infos liste pour Centris ID: {centris_id}")

@@ -28,8 +28,23 @@ API_TIMEOUT = 30
 # CONFIGURATION MONITORING
 # ============================================================================
 
-# URL de la page Matrix Centris à surveiller
-MATRIX_URL = "https://matrix.centris.ca/Matrix/Public/Portal.aspx?ID=0-3319143035-10&eml=Y2JlYXVkZXRAcmF5aGFydmV5LmNh&L=2"
+# Pages Matrix Centris à surveiller (une alerte par catégorie et par région).
+# L'ancienne page combinée « Alerte - 5+ Qc » n'est plus lue.
+_MATRIX_EMAIL = "Y2JlYXVkZXRAcmF5aGFydmV5LmNh"
+_MATRIX_PORTAL = "https://matrix.centris.ca/Matrix/Public/Portal.aspx"
+
+def _matrix_url(portal_id):
+    return f"{_MATRIX_PORTAL}?ID={portal_id}&eml={_MATRIX_EMAIL}&L=2"
+
+MATRIX_SOURCES = [
+    {"name": "3-4 Capitale-Nationale", "url": _matrix_url("0-3755465862-10")},
+    {"name": "3-4 Chaudière-Appalaches", "url": _matrix_url("0-3755467574-10")},
+    {"name": "5+ Capitale-Nationale", "url": _matrix_url("0-3755464753-10")},
+    {"name": "5+ Chaudière-Appalaches", "url": _matrix_url("0-3755468641-10")},
+]
+
+# Conservé pour les scripts qui n'utilisent qu'une page.
+MATRIX_URL = MATRIX_SOURCES[0]["url"]
 
 # Intervalle de monitoring (en minutes)
 MONITORING_INTERVAL = 60  # 1 heure

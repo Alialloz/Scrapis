@@ -27,6 +27,7 @@ try:
         API_HEADERS,
         API_TIMEOUT,
         MATRIX_URL,
+        MATRIX_SOURCES,
         MONITORING_INTERVAL,
         STORAGE_FILE,
         DELAY_BETWEEN_LISTINGS,
@@ -147,7 +148,8 @@ class CentrisProductionMonitor(CentrisMonitor):
         """
         cycle_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         logger.info("="*80)
-        logger.info(f"CYCLE DE MONITORING - {cycle_time}")
+        source = getattr(self, 'source_name', None)
+        logger.info(f"CYCLE DE MONITORING - {cycle_time}" + (f" — {source}" if source else ""))
         logger.info("="*80)
         
         stats = {
@@ -408,7 +410,8 @@ class CentrisProductionMonitor(CentrisMonitor):
         
         logger.info("="*80)
         logger.info("DÉMARRAGE DU MONITORING CONTINU")
-        logger.info(f"URL: {MATRIX_URL}")
+        for source in MATRIX_SOURCES:
+            logger.info(f"Page: {source['name']}")
         logger.info(f"API: {API_ENDPOINT}")
         logger.info(f"Intervalle: {interval_minutes} minutes")
         if self.auto_cleanup_enabled:
@@ -429,8 +432,11 @@ class CentrisProductionMonitor(CentrisMonitor):
                 
                 start_time = time.time()
                 
-                # Exécuter le cycle
-                stats = self.run_monitoring_cycle()
+                for source in MATRIX_SOURCES:
+                    self.url = source["url"]
+                    self.source_name = source["name"]
+                    logger.info(f"--- {source['name']} ---")
+                    self.run_monitoring_cycle()
                 
                 elapsed_time = time.time() - start_time
                 
@@ -473,7 +479,9 @@ def main():
     else:
         logger.info(f"✓ API configurée: {API_ENDPOINT}")
     
-    logger.info(f"✓ URL Matrix: {MATRIX_URL}")
+    logger.info(f"✓ {len(MATRIX_SOURCES)} pages Matrix:")
+    for source in MATRIX_SOURCES:
+        logger.info(f"  - {source['name']}")
     logger.info(f"✓ Intervalle: {MONITORING_INTERVAL} minutes")
     logger.info(f"✓ Fichier de stockage: {STORAGE_FILE}")
     logger.info(f"✓ Date minimale: 2026-02-10 (annonces antérieures ignorées)")
