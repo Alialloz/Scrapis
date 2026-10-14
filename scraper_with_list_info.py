@@ -13,6 +13,35 @@ import requests
 from scraper_detail_complete import CentrisDetailScraperComplete
 
 
+def extraire_ville_liste(container, container_text):
+    """
+    Extrait (ville, arrondissement) d'une carte de la liste Matrix.
+
+    La carte contient deux liens en gras : l'adresse, puis « Ville (Arrondissement) »
+    ou simplement « Ville » (ex. « Saint-Georges », « Lévis (Desjardins) »).
+    Retourne (None, None) si rien n'est trouvé.
+    """
+    try:
+        liens = [
+            a.get_text(" ", strip=True)
+            for a in container.select("b > a[href*='Redisplay']")
+        ]
+    except Exception:
+        liens = []
+    # Le 1er lien est l'adresse, le 2e la ville
+    if len(liens) >= 2 and liens[1]:
+        texte = re.sub(r'\s+', ' ', liens[1]).strip()
+        m = re.match(r'^(.+?)\s*\(([^)]+)\)$', texte)
+        if m:
+            return m.group(1).strip(), m.group(2).strip()
+        return texte, texte
+    # Repli : ancien comportement (Québec / Lévis avec arrondissement)
+    m = re.search(r'(Québec|Lévis)\s*\(([^)]+)\)', container_text or '')
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    return None, None
+
+
 class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
     """Scraper qui extrait d'abord les infos de la liste, puis les détails"""
     
@@ -230,11 +259,11 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
                         break
             
             # Extraire ville et arrondissement - supporter Québec ET Lévis
-            ville_match = re.search(r'(Québec|Lévis)\s*\(([^)]+)\)', container_text)
-            if ville_match:
-                list_data['ville'] = ville_match.group(1).strip()
-                list_data['arrondissement'] = ville_match.group(2).strip()
-                print(f"[OK] Ville/Arrondissement (liste): {list_data['ville']} ({list_data['arrondissement']})")
+            ville, arrondissement = extraire_ville_liste(container, container_text)
+            if ville:
+                list_data['ville'] = ville
+                list_data['arrondissement'] = arrondissement
+                print(f"[OK] Ville/Arrondissement (liste): {ville} ({arrondissement})")
             
             # Extraire le quartier
             quartier_match = re.search(r'(?:dans le quartier|quartier)\s+([A-Za-zÀ-ÿ\s\-\/]+?)\s+construit', container_text, re.IGNORECASE)
@@ -596,11 +625,11 @@ class CentrisScraperWithListInfo(CentrisDetailScraperComplete):
                         break
             
             # Extraire ville et arrondissement - supporter Québec ET Lévis
-            ville_match = re.search(r'(Québec|Lévis)\s*\(([^)]+)\)', container_text)
-            if ville_match:
-                list_data['ville'] = ville_match.group(1).strip()
-                list_data['arrondissement'] = ville_match.group(2).strip()
-                print(f"[OK] Ville/Arrondissement (liste): {list_data['ville']} ({list_data['arrondissement']})")
+            ville, arrondissement = extraire_ville_liste(target_container, container_text)
+            if ville:
+                list_data['ville'] = ville
+                list_data['arrondissement'] = arrondissement
+                print(f"[OK] Ville/Arrondissement (liste): {ville} ({arrondissement})")
             
             # Extraire le quartier (format: "dans le quartier XXX construit")
             quartier_match = re.search(r'(?:dans le quartier|quartier)\s+([A-Za-zÀ-ÿ\s\-\/]+?)\s+construit', container_text, re.IGNORECASE)

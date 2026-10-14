@@ -240,9 +240,15 @@ class CentrisMonitor:
                 'User-Agent': 'CentrisMonitor/1.0'
             }
             
+            # L'API exige des chaînes (pas null) pour ces champs de la liste
+            payload = dict(property_data)
+            for champ in ('ville', 'arrondissement', 'quartier'):
+                if payload.get(champ) is None:
+                    payload[champ] = ''
+
             response = requests.post(
                 self.api_endpoint,
-                json=property_data,
+                json=payload,
                 headers=headers,
                 timeout=30
             )
@@ -252,7 +258,7 @@ class CentrisMonitor:
                 return True
             else:
                 logger.warning(f"API a retourné le status {response.status_code} - Centris #{centris_id}")
-                logger.debug(f"Réponse: {response.text[:200]}")
+                logger.warning(f"Réponse de l'API - Centris #{centris_id}: {response.text[:600]}")
                 return False
                 
         except requests.exceptions.Timeout:
@@ -351,6 +357,27 @@ class CentrisMonitor:
                 pass
             return None
     
+    def _echec_definitif(self, centris_id, max_essais=3):
+        """Compte les échecs d'envoi à l'API ; True quand on abandonne l'annonce."""
+        fichier = 'echecs_api.json'
+        try:
+            with open(fichier, 'r', encoding='utf-8') as f:
+                echecs = json.load(f)
+        except Exception:
+            echecs = {}
+        essais = echecs.get(str(centris_id), 0) + 1
+        echecs[str(centris_id)] = essais
+        try:
+            with open(fichier, 'w', encoding='utf-8') as f:
+                json.dump(echecs, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Impossible d'écrire {fichier}: {e}")
+        if essais >= max_essais:
+            logger.error(f"Centris #{centris_id}: {essais} échecs d'envoi à l'API, abandon (marquée comme traitée)")
+            return True
+        logger.warning(f"Centris #{centris_id}: échec d'envoi {essais}/{max_essais}, nouvel essai au prochain cycle")
+        return False
+
     def run_monitoring_cycle(self):
         """
         Exécute un cycle de monitoring complet
@@ -396,12 +423,15 @@ class CentrisMonitor:
                     logger.info(f"✓ Données sauvegardées dans {filename}")
                     
                     # Envoyer à l'API
-                    if self.send_to_api(property_data):
+                    envoye = self.send_to_api(property_data)
+                    if envoye:
                         stats['sent_to_api'] += 1
                     
-                    # Marquer comme scrapé
-                    self.scraped_ids[centris_id] = datetime.now().isoformat()
-                    self.save_scraped_ids()
+                    # Marquer comme scrapé seulement si l'API a accepté l'annonce.
+                    # En cas d'échec, on réessaie aux cycles suivants (3 essais max).
+                    if envoye or self._echec_definitif(centris_id):
+                        self.scraped_ids[centris_id] = datetime.now().isoformat()
+                        self.save_scraped_ids()
                     
                 else:
                     stats['errors'] += 1
