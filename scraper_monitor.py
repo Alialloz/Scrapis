@@ -57,46 +57,54 @@ class CentrisMonitor:
         buttons = driver.find_elements(By.CSS_SELECTOR, "a[href*='getNextDisplaySet']")
         return buttons[0] if buttons else None
 
-    def load_results(self, driver, centris_id=None, max_pages=40):
+    def load_results(self, driver, centris_id=None, max_pages=60):
         """
         Charge les pages de résultats Matrix (« Voir plus de résultats »).
 
+        Matrix n'affiche qu'une fenêtre glissante d'environ 96 annonces : après
+        4 clics, les premières annonces (les plus récentes) disparaissent du DOM.
+        On cumule donc tous les numéros vus dans self.all_ids à chaque lecture.
+
         Sans centris_id, charge toutes les annonces de la recherche.
-        Avec centris_id, s'arrête dès que cette annonce est visible.
+        Avec centris_id, s'arrête dès que cette annonce est visible dans le DOM.
         """
         target = str(centris_id) if centris_id else None
+        self.all_ids = set()
+
+        def lire():
+            ids = self._centris_ids_in(driver.page_source)
+            self.all_ids |= ids
+            return ids
+
         for page in range(max_pages):
-            source = driver.page_source
-            ids = self._centris_ids_in(source)
+            ids = lire()
             if target and target in ids:
                 logger.info(f"Annonce {target} visible après {page} page(s) supplémentaire(s)")
                 return True
 
-            button = self._more_results_button(driver)
-            if button is None:
-                logger.info(f"Résultats complets: {len(ids)} annonces")
-                return target is None or target in ids
+            if self._more_results_button(driver) is None:
+                logger.info(f"Résultats complets: {len(self.all_ids)} annonces")
+                return target is None or target in self.all_ids
 
-            before = len(ids)
+            avant_cumul = len(self.all_ids)
+            avant_ids = set(ids)
             driver.execute_script("PortalResultsJs.getNextDisplaySet();")
-            loaded = False
+            progresse = False
             for _ in range(20):
                 time.sleep(0.5)
-                source = driver.page_source
-                ids = self._centris_ids_in(source)
+                ids = lire()
                 if target and target in ids:
                     logger.info(f"Annonce {target} visible après {page + 1} page(s) supplémentaire(s)")
                     return True
-                if len(ids) > before or self._more_results_button(driver) is None:
-                    loaded = True
+                if len(self.all_ids) > avant_cumul or self._more_results_button(driver) is None:
+                    progresse = True
                     break
-            if not loaded:
-                logger.warning("La page suivante n'a pas chargé, arrêt du chargement")
-                return False
+            if not progresse:
+                logger.info(f"Fin des résultats: {len(self.all_ids)} annonces au total")
+                return target is None
 
-        logger.warning(f"Limite de {max_pages} pages atteinte")
-        return False
-        
+        logger.warning(f"Limite de {max_pages} pages atteinte ({len(self.all_ids)} annonces)")
+        return target is None
     def load_scraped_ids(self):
         """
         Charge la liste des numéros Centris déjà scrapés
@@ -177,7 +185,7 @@ class CentrisMonitor:
 
             self.load_results(driver)
 
-            listing_ids = list(self._centris_ids_in(driver.page_source))
+            listing_ids = list(self.all_ids | self._centris_ids_in(driver.page_source))
             
             logger.info(f"✓ {len(listing_ids)} annonces trouvées sur la page")
             
