@@ -17,14 +17,17 @@ def extraire_ville_liste(container, container_text):
     """
     Extrait (ville, arrondissement) d'une carte de la liste Matrix.
 
-    La carte contient deux liens en gras : l'adresse, puis « Ville (Arrondissement) »
+    La carte contient deux liens : l'adresse, puis « Ville (Arrondissement) »
     ou simplement « Ville » (ex. « Saint-Georges », « Lévis (Desjardins) »).
+    Matrix les met tantôt dans des <b>, tantôt dans des <span class="formula">,
+    donc on prend tous les liens « Redisplay » de la carte, quel que soit leur parent.
     Retourne (None, None) si rien n'est trouvé.
     """
     try:
         liens = [
             a.get_text(" ", strip=True)
-            for a in container.select("b > a[href*='Redisplay']")
+            for a in container.select("a[href*='Redisplay']")
+            if a.get_text(" ", strip=True)
         ]
     except Exception:
         liens = []
