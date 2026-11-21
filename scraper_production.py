@@ -46,6 +46,12 @@ except ImportError:
     logger.critical("Veuillez configurer config_api.py avant de lancer le monitoring.")
     sys.exit(1)
 
+# Échanges avec le CRM (Analyse IA) : facultatifs, absents d'un ancien config_api.py
+try:
+    from config_api import ROBOT_API_BASE, ROBOT_API_KEY, JOB_POLL_INTERVAL
+except ImportError:
+    ROBOT_API_BASE, ROBOT_API_KEY, JOB_POLL_INTERVAL = '', '', 60
+
 
 class CentrisProductionMonitor(CentrisMonitor):
     """Version production du moniteur avec configuration personnalisée"""
@@ -70,6 +76,171 @@ class CentrisProductionMonitor(CentrisMonitor):
         self.protected_files = PROTECTED_FILES
         self.auto_backup_scraped_ids = AUTO_BACKUP_SCRAPED_IDS
         self.last_cleanup_date = None
+        # Dernière liste lue pour chaque page Matrix : {nom: {'ids': [...], 'complete': bool}}
+        self.ids_by_source = {}
+        self._bridge_warned = False
+
+    # ------------------------------------------------------------------
+    # Échanges avec le CRM (Analyse IA)
+    # ------------------------------------------------------------------
+
+    def _bridge_enabled(self):
+        if not ROBOT_API_BASE or not ROBOT_API_KEY:
+            if not self._bridge_warned:
+                logger.info("Échanges avec le CRM désactivés (ROBOT_API_KEY absente)")
+                self._bridge_warned = True
+            return False
+        return True
+
+    def _bridge_headers(self):
+        return {
+            'Content-Type': 'application/json',
+            'User-Agent': 'CentrisMonitor/1.0',
+            'X-Robot-Key': ROBOT_API_KEY,
+        }
+
+    def record_source_ids(self, source_name, ids):
+        """Retient la liste lue sur une page Matrix. Une page vide est jugée non fiable."""
+        if not source_name:
+            return
+        self.ids_by_source[source_name] = {'ids': list(ids), 'complete': len(ids) > 0}
+
+    def push_snapshot(self):
+        """Envoie à l'API la liste des annonces actuellement sur les pages Matrix."""
+        if not self._bridge_enabled():
+            return False
+
+        import requests
+
+        sources = []
+        for source in MATRIX_SOURCES:
+            known = self.ids_by_source.get(source['name'])
+            sources.append({
+                'name': source['name'],
+                'ids': known['ids'] if known else [],
+                'complete': bool(known and known['complete']),
+            })
+
+        try:
+            response = requests.post(
+                f"{ROBOT_API_BASE}/centris-snapshot",
+                json={'sources': sources, 'minDate': self.min_date},
+                headers=self._bridge_headers(),
+                timeout=API_TIMEOUT,
+            )
+            if response.status_code in (200, 201):
+                total = sum(len(s['ids']) for s in sources)
+                logger.info(f"✓ Liste Centris envoyée à l'API ({total} annonces)")
+                return True
+            logger.warning(f"Liste Centris refusée par l'API (status {response.status_code}): {response.text[:200]}")
+        except Exception as e:
+            logger.warning(f"Impossible d'envoyer la liste Centris: {e}")
+        return False
+
+    def collect_snapshot(self):
+        """Relit toutes les pages Matrix (sans scraper de nouvelles annonces) puis envoie la liste."""
+        saved_url, saved_name = self.url, self.source_name
+        try:
+            for source in MATRIX_SOURCES:
+                self.url = source['url']
+                self.source_name = source['name']
+                logger.info(f"--- Liste Centris (demande du CRM): {source['name']} ---")
+                self.record_source_ids(source['name'], self.get_all_listing_ids())
+        finally:
+            self.url, self.source_name = saved_url, saved_name
+        return self.push_snapshot()
+
+    def _claim_job(self):
+        import requests
+
+        try:
+            response = requests.get(
+                f"{ROBOT_API_BASE}/jobs/next",
+                headers=self._bridge_headers(),
+                timeout=API_TIMEOUT,
+            )
+        except Exception as e:
+            logger.debug(f"Tâches du CRM injoignables: {e}")
+            return None
+
+        if response.status_code != 200:
+            if response.status_code in (401, 503):
+                logger.warning(f"Tâches du CRM refusées (status {response.status_code}): vérifier ROBOT_API_KEY")
+            return None
+
+        try:
+            return response.json().get('job')
+        except Exception:
+            return None
+
+    def _report_job(self, job_id, success, result=None, error=None):
+        import requests
+
+        body = {'success': success}
+        if result is not None:
+            body['result'] = result
+        if error:
+            body['error'] = str(error)[:900]
+
+        try:
+            requests.post(
+                f"{ROBOT_API_BASE}/jobs/{job_id}/result",
+                json=body,
+                headers=self._bridge_headers(),
+                timeout=API_TIMEOUT,
+            )
+        except Exception as e:
+            logger.warning(f"Résultat de la tâche {job_id} non transmis: {e}")
+
+    def _run_job(self, job):
+        job_id = job.get('id')
+        kind = job.get('type')
+        payload = job.get('payload') or {}
+        logger.info(f"Tâche du CRM #{job_id}: {kind}")
+
+        saved_url, saved_name = self.url, self.source_name
+        try:
+            if kind == 'CENTRIS_SNAPSHOT':
+                sent = self.collect_snapshot()
+                self._report_job(job_id, bool(sent), result={'sent': bool(sent)}, error=None if sent else "Liste non transmise à l'API")
+            elif kind == 'CENTRIS_LISTINGS':
+                results = {}
+                for item in payload.get('items', []):
+                    numbers = [str(n) for n in item.get('numbers', [])]
+                    source = next((s for s in MATRIX_SOURCES if s['name'] == item.get('source')), None)
+                    if source is None:
+                        results.update({n: None for n in numbers})
+                        continue
+                    self.url = source['url']
+                    self.source_name = source['name']
+                    results.update(self.read_listings_info(source['url'], numbers))
+                self._report_job(job_id, True, result={'results': results})
+            else:
+                raise ValueError(f"Type de tâche inconnu: {kind}")
+        except Exception as e:
+            logger.error(f"Tâche du CRM #{job_id} échouée: {e}", exc_info=True)
+            self._report_job(job_id, False, error=e)
+        finally:
+            self.url, self.source_name = saved_url, saved_name
+
+    def serve_pending_jobs(self, max_jobs=5):
+        """Exécute les tâches en attente demandées depuis le CRM (l'API les met en file, le robot vient les chercher)."""
+        if not self._bridge_enabled():
+            return
+        for _ in range(max_jobs):
+            job = self._claim_job()
+            if not job:
+                return
+            self._run_job(job)
+
+    def wait_and_serve_jobs(self, total_seconds):
+        """Attend le prochain cycle en vérifiant régulièrement les tâches du CRM."""
+        waited = 0
+        while waited < total_seconds:
+            self.serve_pending_jobs()
+            step = min(JOB_POLL_INTERVAL, total_seconds - waited)
+            time.sleep(step)
+            waited += step
         
     def _normalize_for_api(self, data):
         """
@@ -165,6 +336,7 @@ class CentrisProductionMonitor(CentrisMonitor):
             # 1. Récupérer tous les IDs actuels
             current_ids = self.get_all_listing_ids()
             stats['total_listings'] = len(current_ids)
+            self.record_source_ids(getattr(self, 'source_name', None), current_ids)
             
             # 2. Identifier les nouvelles annonces
             new_ids = self.identify_new_listings(current_ids)
@@ -437,6 +609,11 @@ class CentrisProductionMonitor(CentrisMonitor):
                     self.source_name = source["name"]
                     logger.info(f"--- {source['name']} ---")
                     self.run_monitoring_cycle()
+                    # Entre deux pages : tâches demandées depuis le CRM
+                    self.serve_pending_jobs()
+                
+                # Liste complète des annonces Centris, pour l'Analyse IA du CRM
+                self.push_snapshot()
                 
                 elapsed_time = time.time() - start_time
                 
@@ -444,8 +621,8 @@ class CentrisProductionMonitor(CentrisMonitor):
                 logger.info(f"Prochain cycle dans {interval_minutes} minutes...")
                 logger.info(f"Appuyez sur Ctrl+C pour arrêter le monitoring")
                 
-                # Attendre avant le prochain cycle
-                time.sleep(interval_minutes * 60)
+                # Attendre avant le prochain cycle (en servant les tâches du CRM)
+                self.wait_and_serve_jobs(interval_minutes * 60)
                 
         except KeyboardInterrupt:
             logger.info("Arrêt du monitoring demandé par l'utilisateur")

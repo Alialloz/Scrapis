@@ -357,6 +357,63 @@ class CentrisMonitor:
                 pass
             return None
     
+    def read_listings_info(self, url, numbers):
+        """
+        Lit, sur la liste Matrix, les informations de plusieurs annonces
+        (prix, adresse, ville, type, statut, date d'envoi) sans ouvrir le détail
+        ni télécharger de photos. Sert à l'Analyse IA du CRM.
+
+        Args:
+            url: URL de la page Matrix où se trouvent les annonces
+            numbers: numéros Centris à lire
+
+        Returns:
+            dict: {numero_centris: infos ou None si l'annonce n'a pas été trouvée}
+        """
+        fields = (
+            'prix', 'adresse', 'ville', 'arrondissement', 'quartier',
+            'type_propriete', 'annee_construction', 'statut', 'date_envoi',
+        )
+        results = {}
+        scraper = None
+
+        try:
+            scraper = CentrisScraperWithListInfo()
+            scraper.init_driver()
+
+            for number in numbers:
+                number = str(number)
+                try:
+                    # Matrix n'affiche qu'une fenêtre glissante : on repart de la page
+                    # initiale pour chaque annonce.
+                    scraper.driver.get(url)
+                    time.sleep(5)
+                    if not self.load_results(scraper.driver, number):
+                        logger.warning(f"Centris #{number}: introuvable sur la page (lecture CRM)")
+                        results[number] = None
+                        continue
+
+                    info = scraper.extract_info_from_list_by_centris_id(number) or {}
+                    if not info.get('prix') and not info.get('adresse'):
+                        logger.warning(f"Centris #{number}: aucune information lue (lecture CRM)")
+                        results[number] = None
+                        continue
+
+                    results[number] = {key: info.get(key) for key in fields}
+                except Exception as e:
+                    logger.error(f"Erreur de lecture de l'annonce {number}: {e}", exc_info=True)
+                    results[number] = None
+
+                time.sleep(2)
+        finally:
+            if scraper is not None:
+                try:
+                    scraper.close()
+                except Exception:
+                    pass
+
+        return results
+
     def _echec_definitif(self, centris_id, max_essais=3):
         """Compte les échecs d'envoi à l'API ; True quand on abandonne l'annonce."""
         fichier = 'echecs_api.json'

@@ -25,6 +25,36 @@ API_HEADERS = {
 API_TIMEOUT = 30
 
 # ============================================================================
+# ÉCHANGES AVEC LE CRM (Analyse IA)
+# ============================================================================
+# Le robot n'ouvre aucun port : il envoie sa liste d'annonces Centris à l'API
+# et vient y chercher les tâches demandées depuis le CRM (Outils > Analyse IA).
+# La clé partagée (ROBOT_API_KEY de l'API) se lit dans la variable
+# d'environnement ROBOT_API_KEY, ou dans le fichier robot_api_key.txt placé à
+# côté de ce fichier (jamais commité).
+import os as _os
+
+ROBOT_API_BASE = API_ENDPOINT.rsplit('/', 1)[0]  # https://.../robot/api
+
+
+def _read_robot_api_key():
+    key = _os.environ.get('ROBOT_API_KEY', '').strip()
+    if key:
+        return key
+    path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'robot_api_key.txt')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except OSError:
+        return ''
+
+
+ROBOT_API_KEY = _read_robot_api_key()
+
+# Fréquence de vérification des tâches du CRM (en secondes)
+JOB_POLL_INTERVAL = 60
+
+# ============================================================================
 # CONFIGURATION MONITORING
 # ============================================================================
 

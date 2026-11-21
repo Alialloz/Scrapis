@@ -56,3 +56,6 @@ logs/
 !logs/.gitkeep
 
 
+
+# Cle partagee avec l'API (jamais commitee)
+robot_api_key.txt
