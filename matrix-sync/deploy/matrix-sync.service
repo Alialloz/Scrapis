@@ -1,0 +1,27 @@
+[Unit]
+Description=Robot de synchronisation Matrix (independant de Scrapis)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=matrixsync
+Group=matrixsync
+WorkingDirectory=/opt/matrix-sync
+EnvironmentFile=/opt/matrix-sync/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/opt/matrix-sync
+ExecStart=/opt/matrix-sync/venv/bin/python /opt/matrix-sync/matrix_robot.py
+Restart=always
+RestartSec=15
+# Le serveur est partage avec Scrapis : le robot ne doit jamais l'etouffer.
+MemoryHigh=800M
+MemoryMax=950M
+Nice=5
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=append:/var/log/matrix-sync.log
+StandardError=append:/var/log/matrix-sync.log
+
+[Install]
+WantedBy=multi-user.target
