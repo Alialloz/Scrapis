@@ -11,6 +11,7 @@ from matrix_browser import (
     LoginError,
     MatrixBrowser,
     MatrixError,
+    SessionLostError,
     SmsTimeout,
 )
 
@@ -36,6 +37,7 @@ class SyncRunner:
         self.browser = MatrixBrowser()
         self.phase_results: Dict[str, Dict[str, Any]] = {}
         self._last_control = 0.0
+        self._session_resets = 0
 
     # ---- Échanges avec le CRM ------------------------------------------------------------------
 
@@ -100,7 +102,7 @@ class SyncRunner:
             for index, phase in enumerate(self.phases, start=1):
                 self.check_cancel(force=True)
                 try:
-                    self.run_phase(phase, index, len(self.phases))
+                    self.run_phase_with_recovery(phase, index, len(self.phases))
                 except (Cancelled, LoginError, SmsTimeout):
                     raise
                 except (MatrixError, ApiError) as error:
@@ -131,6 +133,27 @@ class SyncRunner:
             self.api.item_error(self.run_id, phase, number, message)
         except ApiError as error:
             logger.warning("Erreur d'annonce non transmise : %s", error)
+
+    def run_phase_with_recovery(self, phase: str, index: int, total: int) -> None:
+        """Si Matrix coupe la session, on se reconnecte une fois pour toute la synchronisation, puis on reprend l'étape."""
+        try:
+            self.run_phase(phase, index, total)
+        except SessionLostError:
+            self.recover_session()
+            self.run_phase(phase, index, total)
+
+    def recover_session(self) -> None:
+        if self._session_resets >= 1:
+            raise SessionLostError(
+                "Matrix a de nouveau coupé la session du robot après une reconnexion : le même code d'usager est "
+                "utilisé ailleurs. Utilisez un code d'usager réservé au robot."
+            )
+        self._session_resets += 1
+        logger.warning("Matrix a coupé la session : nouvelle connexion complète.")
+        self.report("Session Matrix interrompue : nouvelle connexion", state="RUNNING")
+        self.browser.reset_session()
+        self.browser.login(self.ask_sms, lambda step: self.report(step))
+        self.report("Reconnecté à Matrix", state="RUNNING", login_ok=True)
 
     def run_phase(self, phase: str, index: int, total: int) -> None:
         since = self.dates.get(phase)

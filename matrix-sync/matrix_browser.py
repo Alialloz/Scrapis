@@ -40,6 +40,10 @@ class LoginError(MatrixError):
     """Connexion refusée ou impossible : on n'insiste pas, pour ne pas verrouiller le compte."""
 
 
+class SessionLostError(LoginError):
+    """Matrix a coupé la session (page « Autre session détectée »)."""
+
+
 class SmsTimeout(MatrixError):
     """Le code SMS n'a pas été fourni à temps."""
 
@@ -407,9 +411,8 @@ class MatrixBrowser:
         if link is None:
             self.save_debug("favorites-introuvables")
             if self._other_session_detected():
-                raise LoginError(
-                    "Matrix a coupé la session du robot : quelqu'un s'est connecté avec le même code d'usager. "
-                    "Utilisez un code d'usager réservé au robot."
+                raise SessionLostError(
+                    "Matrix a coupé la session du robot (page « Autre session détectée »)."
                 )
             raise MatrixError("Aucune recherche favorite trouvée sur le tableau de bord de Matrix.")
         name = (link.get_attribute("textContent") or "").strip()
@@ -419,11 +422,27 @@ class MatrixBrowser:
             self._wait_for(lambda: "Results.aspx" in self.driver.current_url, "ouverture de la recherche favorite")
         except MatrixError:
             if self._other_session_detected():
-                raise LoginError(
-                    "Matrix a coupé la session du robot : quelqu'un s'est connecté avec le même code d'usager. "
-                    "Utilisez un code d'usager réservé au robot."
+                raise SessionLostError(
+                    "Matrix a coupé la session du robot (page « Autre session détectée »)."
                 ) from None
             raise
+
+    def reset_session(self) -> None:
+        """Oublie la session : cookies du navigateur et fichier de cookies. La prochaine connexion repart de zéro."""
+        assert self.driver
+        try:
+            self._cdp("Network.enable")
+            self._cdp("Network.clearBrowserCookies")
+        except WebDriverException as error:
+            logger.warning("Cookies du navigateur non effacés : %s", error)
+        try:
+            config.COOKIES_FILE.unlink(missing_ok=True)
+        except OSError as error:
+            logger.warning("Fichier de cookies non supprimé : %s", error)
+        try:
+            self.driver.get("about:blank")
+        except WebDriverException:
+            pass
 
     def _other_session_detected(self) -> bool:
         """Vrai si Matrix affiche « Autre session détectée » (un autre appareil s'est connecté avec le même code)."""
