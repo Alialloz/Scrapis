@@ -295,6 +295,11 @@ class MatrixBrowser:
             report("Connexion à Matrix")
             self._submit_credentials()
             info = self._wait_state(["matrix", "sms", "login"], 45)
+            if info["state"] == "login" and not info.get("errors"):
+                # Aucun message d'erreur : Centris est probablement juste lent (ou en train de rediriger).
+                # On patiente sans soumettre à nouveau les identifiants.
+                logger.info("Connexion lente : attente supplémentaire de Matrix.")
+                info = self._wait_state(["matrix", "sms"], 60)
             if info["state"] == "login":
                 self.save_debug("identifiants-refuses")
                 detail = info["errors"][0] if info.get("errors") else "message non lisible"
@@ -527,19 +532,13 @@ class MatrixBrowser:
                 return
             time.sleep(0.4)
 
-    def _click_search(self, retry: bool = False) -> None:
-        """Clique sur « Résultats ». Au deuxième essai, déclenche directement l'envoi du formulaire."""
+    def _click_search(self) -> None:
+        """Clique sur « Résultats »."""
         self._js(
             """
-            const retry = arguments[0];
             const a = document.getElementById('m_ucSearchButtons_m_lbSearch');
-            if (retry && typeof __doPostBack === 'function') {
-                __doPostBack('m_ucSearchButtons$m_lbSearch', '');
-            } else if (a) {
-                a.click();
-            }
-            """,
-            retry,
+            if (a) { a.click(); }
+            """
         )
 
     def _on_criteria_tab(self) -> bool:
@@ -555,13 +554,19 @@ class MatrixBrowser:
         clicks = 1
         while time.time() < deadline:
             try:
-                # Le clic n'a pas pris : on réessaie quelques fois avant d'abandonner.
-                if clicks < 3 and time.time() - last_click > 12 and self._on_criteria_tab():
-                    logger.info("Le formulaire de critères est toujours affiché : nouveau clic sur « Résultats ».")
-                    self._wait_no_async_postback(10)
-                    self._click_search(retry=True)
-                    last_click = time.time()
-                    clicks += 1
+                if self._on_criteria_tab():
+                    # Les résultats ne sont pas encore affichés. Surtout ne pas toucher à l'affichage
+                    # « Détaillé » ici : son envoi interromprait celui de la recherche, qui resterait
+                    # bloquée sur les critères. Si le clic n'a pas pris, on le refait après un délai.
+                    if self._no_result_message():
+                        return 0
+                    if clicks < 3 and time.time() - last_click > 12:
+                        last_click = time.time()
+                        clicks += 1
+                        logger.info("Le formulaire de critères est toujours affiché : nouveau clic sur « Résultats ».")
+                        self._wait_no_async_postback(10)
+                        self._click_search()
+                    time.sleep(1)
                     continue
                 if self._ensure_detailed_display():
                     # L'affichage vient de changer : la page se recharge.
@@ -571,8 +576,7 @@ class MatrixBrowser:
                 if header["number"]:
                     counter = helpers.parse_counter(header["counter_text"])
                     return counter[1] if counter else 1
-                text = self._js("return document.body ? document.body.innerText : ''") or ""
-                if re.search(r"aucun(e)?\s+(r[eé]sultat|inscription|propri[eé]t[eé]|correspond)", text, re.IGNORECASE):
+                if self._no_result_message():
                     return 0
             except WebDriverException:
                 pass
@@ -580,6 +584,9 @@ class MatrixBrowser:
         self.save_debug("resultats-inconnus")
         raise MatrixError("La page de résultats n'a ni fiche ni message « aucun résultat ».")
 
+    def _no_result_message(self) -> bool:
+        text = self._js("return document.body ? document.body.innerText : ''") or ""
+        return bool(re.search(r"aucun(e)?\s+(r[eé]sultat|inscription|propri[eé]t[eé]|correspond)", text, re.IGNORECASE))
     def _ensure_detailed_display(self) -> bool:
         """Les fiches se lisent une à une en affichage « Détaillé » (1 par page).
 
