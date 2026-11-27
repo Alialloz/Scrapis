@@ -126,6 +126,8 @@ return '';
 """
 
 
+OTHER_SESSION_RE = re.compile(r"(autre session d[ée]tect|une autre personne a ouvert une session|another session)", re.IGNORECASE)
+
 class MatrixBrowser:
     def __init__(self) -> None:
         self.driver: Optional[webdriver.Chrome] = None
@@ -266,6 +268,16 @@ class MatrixBrowser:
         self.driver.get(config.MATRIX_URL)
         info = self._wait_state(["matrix", "login", "sms"], 40)
 
+        if info["state"] == "matrix" and self._other_session_detected():
+            # Matrix n'autorise qu'une session par code d'usager : quelqu'un s'est connecté avec le même
+            # code et a coupé celle du robot. On repart de la page de connexion.
+            logger.warning("Matrix signale qu'une autre session a pris la place : reconnexion.")
+            report("Session Matrix interrompue : reconnexion")
+            self._click_first_button(r"(poursuivre|authentification|continue|sign in)")
+            info = self._wait_state(["login", "sms", "matrix"], 40)
+            if info["state"] == "matrix" and self._other_session_detected():
+                raise LoginError("Matrix indique toujours qu'une autre session est ouverte avec ce code d'usager.")
+
         if info["state"] == "matrix":
             logger.info("Session Matrix encore valide : aucune connexion nécessaire.")
             return
@@ -394,11 +406,32 @@ class MatrixBrowser:
                 time.sleep(1)
         if link is None:
             self.save_debug("favorites-introuvables")
+            if self._other_session_detected():
+                raise LoginError(
+                    "Matrix a coupé la session du robot : quelqu'un s'est connecté avec le même code d'usager. "
+                    "Utilisez un code d'usager réservé au robot."
+                )
             raise MatrixError("Aucune recherche favorite trouvée sur le tableau de bord de Matrix.")
         name = (link.get_attribute("textContent") or "").strip()
         logger.info("Recherche favorite : %s", name)
         self._js("arguments[0].click()", link)
-        self._wait_for(lambda: "Results.aspx" in self.driver.current_url, "ouverture de la recherche favorite")
+        try:
+            self._wait_for(lambda: "Results.aspx" in self.driver.current_url, "ouverture de la recherche favorite")
+        except MatrixError:
+            if self._other_session_detected():
+                raise LoginError(
+                    "Matrix a coupé la session du robot : quelqu'un s'est connecté avec le même code d'usager. "
+                    "Utilisez un code d'usager réservé au robot."
+                ) from None
+            raise
+
+    def _other_session_detected(self) -> bool:
+        """Vrai si Matrix affiche « Autre session détectée » (un autre appareil s'est connecté avec le même code)."""
+        try:
+            text = self._js("return document.body ? document.body.innerText : ''") or ""
+        except WebDriverException:
+            return False
+        return bool(OTHER_SESSION_RE.search(text))
 
     def _wait_for(self, condition: Callable[[], Any], what: str, timeout: Optional[float] = None) -> Any:
         try:
@@ -436,14 +469,69 @@ class MatrixBrowser:
             raise MatrixError(result.get("error") or "Critères non remplis.")
         logger.info("%s : %s, %s = %s", phase, criteria["status"], criteria["date_field"], helpers.matrix_date(since_iso))
 
-        self._js("document.getElementById('m_ucSearchButtons_m_lbSearch').click()")
+        # Matrix recompte les résultats en arrière-plan dès qu'un critère change. Un clic sur
+        # « Résultats » pendant ce recalcul est ignoré : on attend la fin avant de cliquer.
+        self._wait_no_async_postback()
+        self._click_search()
         return self._wait_for_results()
+
+    def _wait_no_async_postback(self, timeout: float = 20) -> None:
+        """Attend que la page n'ait plus de mise à jour partielle en cours (ASP.NET)."""
+        deadline = time.time() + timeout
+        calm_since: Optional[float] = None
+        while time.time() < deadline:
+            try:
+                busy = bool(self._js(
+                    "const s = window.Sys && Sys.WebForms && Sys.WebForms.PageRequestManager;"
+                    "const m = s ? s.getInstance() : null;"
+                    "return m ? !!m.get_isInAsyncPostBack() : false;"
+                ))
+            except WebDriverException:
+                busy = False
+            if busy:
+                calm_since = None
+            elif calm_since is None:
+                calm_since = time.time()
+            elif time.time() - calm_since >= 1.5:
+                return
+            time.sleep(0.4)
+
+    def _click_search(self, retry: bool = False) -> None:
+        """Clique sur « Résultats ». Au deuxième essai, déclenche directement l'envoi du formulaire."""
+        self._js(
+            """
+            const retry = arguments[0];
+            const a = document.getElementById('m_ucSearchButtons_m_lbSearch');
+            if (retry && typeof __doPostBack === 'function') {
+                __doPostBack('m_ucSearchButtons$m_lbSearch', '');
+            } else if (a) {
+                a.click();
+            }
+            """,
+            retry,
+        )
+
+    def _on_criteria_tab(self) -> bool:
+        """Vrai tant que le formulaire de critères est affiché (et non les résultats)."""
+        return bool(self._js(
+            "const e = document.getElementById('Fm103_Ctrl3227_LB'); return !!(e && e.offsetParent !== null);"
+        ))
 
     def _wait_for_results(self) -> int:
         """Attend soit la première fiche, soit le message « aucun résultat »."""
         deadline = time.time() + config.PAGE_TIMEOUT
+        last_click = time.time()
+        clicks = 1
         while time.time() < deadline:
             try:
+                # Le clic n'a pas pris : on réessaie quelques fois avant d'abandonner.
+                if clicks < 3 and time.time() - last_click > 12 and self._on_criteria_tab():
+                    logger.info("Le formulaire de critères est toujours affiché : nouveau clic sur « Résultats ».")
+                    self._wait_no_async_postback(10)
+                    self._click_search(retry=True)
+                    last_click = time.time()
+                    clicks += 1
+                    continue
                 if self._ensure_detailed_display():
                     # L'affichage vient de changer : la page se recharge.
                     time.sleep(2)
