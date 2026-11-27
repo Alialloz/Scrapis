@@ -427,6 +427,18 @@ class MatrixBrowser:
                 ) from None
             raise
 
+    def logout(self) -> None:
+        """Ferme la session Matrix (« Fermer la session »). Sans cela, la session reste ouverte côté
+        Matrix après la synchronisation et gêne la connexion suivante (autre session détectée)."""
+        if not self.driver:
+            return
+        try:
+            self.driver.get(config.MATRIX_URL.rstrip("/") + "/Logout.aspx")
+            time.sleep(3)
+            logger.info("Session Matrix fermée.")
+        except WebDriverException as error:
+            logger.warning("Fermeture de la session Matrix impossible : %s", error)
+
     def reset_session(self) -> None:
         """Oublie la session : cookies du navigateur et fichier de cookies. La prochaine connexion repart de zéro."""
         assert self.driver

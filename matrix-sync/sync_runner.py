@@ -120,6 +120,8 @@ class SyncRunner:
             self.browser.save_debug("echec")
             self.finish(False, f"Erreur inattendue : {error}")
         finally:
+            # Toujours fermer la session Matrix, que la synchronisation ait réussi ou non.
+            self.browser.logout()
             self.browser.stop()
 
     def finish(self, success: bool, error: Optional[str] = None) -> None:
